@@ -375,9 +375,12 @@ search_providers:
     enabled: false
     api_key_env: "GOOGLE_CUSTOM_SEARCH_API_KEY"
     cx_env: "GOOGLE_CUSTOM_SEARCH_CX"
+    max_queries_per_cycle: 15          # free tier = 100/day; keep well under it
   bing:
     enabled: false
     api_key_env: "BING_SEARCH_API_KEY"
+    endpoint: "https://api.bing.microsoft.com/v7.0/search"
+    max_queries_per_cycle: 20
   serpapi:
     enabled: false
     api_key_env: "SERPAPI_API_KEY"

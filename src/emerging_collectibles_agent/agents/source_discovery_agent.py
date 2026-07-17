@@ -458,13 +458,23 @@ class SourceDiscoveryAgent:
         cx = self.config.env(conf.get("cx_env", "GOOGLE_CUSTOM_SEARCH_CX"))
         if not key or not cx:
             return []
-        out = []
-        for vertical, query in queries:
+        # protect the free quota (100/day): cap queries per cycle
+        cap = int(conf.get("max_queries_per_cycle", 15))
+        out, fails = [], 0
+        for vertical, query in queries[:cap]:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
             try:
                 resp = self._client.get("https://www.googleapis.com/customsearch/v1",
                                         params={"key": key, "cx": cx, "q": query, "num": 10})
+                if resp.status_code != 200:   # 429 quota / 403 bad key
+                    fails += 1
+                    log.debug("Google CSE HTTP %s for %s", resp.status_code, query)
+                    continue
                 data = resp.json()
+                fails = 0
             except Exception:
+                fails += 1
                 continue
             for item in data.get("items", []):
                 du = self._make_url(item.get("link", ""), "search_api", "google_cse",
@@ -472,6 +482,7 @@ class SourceDiscoveryAgent:
                                     title=item.get("title", ""), snippet=item.get("snippet", ""))
                 if du:
                     out.append(du)
+        log.info("Google CSE discovered %d urls (cap %d)", len(out), cap)
         return out
 
     def _bing(self, queries) -> list[DiscoveredURL]:
@@ -481,16 +492,26 @@ class SourceDiscoveryAgent:
         key = self.config.env(conf.get("api_key_env", "BING_SEARCH_API_KEY"))
         if not key:
             return []
-        out = []
-        for vertical, query in queries:
+        cap = int(conf.get("max_queries_per_cycle", 20))
+        endpoint = conf.get("endpoint", "https://api.bing.microsoft.com/v7.0/search")
+        out, fails = [], 0
+        for vertical, query in queries[:cap]:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
             try:
                 resp = self._client.get(
-                    "https://api.bing.microsoft.com/v7.0/search",
+                    endpoint,
                     params={"q": query, "count": 10},
                     headers={"Ocp-Apim-Subscription-Key": key},
                 )
+                if resp.status_code != 200:
+                    fails += 1
+                    log.debug("Bing HTTP %s for %s", resp.status_code, query)
+                    continue
                 data = resp.json()
+                fails = 0
             except Exception:
+                fails += 1
                 continue
             for item in data.get("webPages", {}).get("value", []):
                 du = self._make_url(item.get("url", ""), "search_api", "bing",
