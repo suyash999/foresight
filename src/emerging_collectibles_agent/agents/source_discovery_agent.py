@@ -179,6 +179,127 @@ class SourceDiscoveryAgent:
         log.info("RSS discovered %d urls from %d feeds", len(out), len(feeds))
         return out
 
+    # -- channel: Reddit collector communities (public RSS, keyless) --------
+    def _from_reddit(self) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_reddit_discovery", True) or \
+                not self.sp.get("reddit", {}).get("enabled", True):
+            return []
+        subs = self.config.get("seed_reddit_subreddits", [])
+        if not subs:
+            return []
+        try:
+            import feedparser
+        except Exception:
+            return []
+        out: list[DiscoveredURL] = []
+        fails = 0
+        for entry in subs:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
+            sub = entry.get("sub") if isinstance(entry, dict) else entry
+            st = entry.get("source_type", "collector forum") if isinstance(entry, dict) else "collector forum"
+            vh = entry.get("verticals") if isinstance(entry, dict) else None
+            rss_url = f"https://www.reddit.com/r/{sub}/.rss"
+            try:
+                resp = self._client.get(rss_url, headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; CollectiblesResearchBot/1.0)"})
+                if resp.status_code == 429:
+                    fails += 1
+                    time.sleep(2.0)  # polite backoff on Reddit rate limit
+                    continue
+                if resp.status_code != 200:
+                    fails += 1
+                    continue
+                parsed = feedparser.parse(resp.content)
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("Reddit RSS failed r/%s: %s", sub, exc)
+                continue
+            for item in parsed.entries[:40]:
+                du = self._make_url(item.get("link", ""), "reddit", f"r/{sub}", st, vh,
+                                    title=item.get("title", ""),
+                                    snippet=item.get("summary", "")[:300],
+                                    published=item.get("published", "") or item.get("updated", ""))
+                if du:
+                    out.append(du)
+            time.sleep(1.2)  # stay under Reddit's rate limit
+        log.info("Reddit discovered %d urls from %d subreddits", len(out), len(subs))
+        return out
+
+    # -- channel: YouTube (OFFICIAL channel RSS feeds, keyless) -------------
+    def _from_youtube(self) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_youtube_discovery", True):
+            return []
+        channels = self.config.get("seed_youtube_channels", [])
+        if not channels:
+            return []
+        try:
+            import feedparser
+        except Exception:
+            return []
+        out: list[DiscoveredURL] = []
+        for ch in channels:
+            if not self._time_left():
+                break
+            cid = ch.get("channel_id") if isinstance(ch, dict) else ch
+            st = ch.get("source_type", "social/news aggregation") if isinstance(ch, dict) else "social/news aggregation"
+            vh = ch.get("verticals") if isinstance(ch, dict) else None
+            feed = f"https://www.youtube.com/feeds/videos.xml?channel_id={cid}"
+            try:
+                resp = self._client.get(feed)
+                if resp.status_code != 200:
+                    continue
+                parsed = feedparser.parse(resp.content)
+            except Exception as exc:
+                log.debug("YouTube RSS failed %s: %s", cid, exc)
+                continue
+            for item in parsed.entries[:30]:
+                du = self._make_url(item.get("link", ""), "youtube", cid, st, vh,
+                                    title=item.get("title", ""),
+                                    snippet=item.get("summary", "")[:300],
+                                    published=item.get("published", ""))
+                if du:
+                    out.append(du)
+        log.info("YouTube discovered %d urls from %d channels", len(out), len(channels))
+        return out
+
+    # -- channel: Hacker News (Algolia public API, keyless) -----------------
+    def _from_hackernews(self, queries: list[tuple[str, str]]) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_hn_discovery", True) or \
+                not self.sp.get("hackernews", {}).get("enabled", True):
+            return []
+        out: list[DiscoveredURL] = []
+        fails = 0
+        seen_q: set[str] = set()
+        for vertical, query in queries:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
+            if query in seen_q:
+                continue
+            seen_q.add(query)
+            try:
+                resp = self._client.get("https://hn.algolia.com/api/v1/search",
+                                        params={"query": query, "tags": "story", "hitsPerPage": 10})
+                if resp.status_code != 200:
+                    fails += 1
+                    continue
+                data = resp.json()
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("HN failed for %s: %s", query, exc)
+                continue
+            for hit in data.get("hits", []):
+                url = hit.get("url") or (f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
+                du = self._make_url(url, "hackernews", query, "social/news aggregation", [vertical],
+                                    seed_query=query, title=hit.get("title", ""),
+                                    published=hit.get("created_at", ""))
+                if du:
+                    out.append(du)
+        log.info("Hacker News discovered %d urls", len(out))
+        return out
+
     # -- channel: sitemaps --------------------------------------------------
     def _from_sitemaps(self) -> list[DiscoveredURL]:
         if not self.ud.get("enable_sitemap_discovery", True):
@@ -462,6 +583,9 @@ class SourceDiscoveryAgent:
 
         results += self._from_seeds()
         results += self._from_rss()
+        results += self._from_reddit()
+        results += self._from_youtube()
+        results += self._from_hackernews(queries)
         results += self._from_sitemaps()
         results += self._from_gdelt(queries)
         results += self._from_wikipedia(queries)

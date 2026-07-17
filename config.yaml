@@ -194,6 +194,38 @@ seed_sitemaps:
     source_type: "hobby publication"
     verticals: ["Trading Cards"]
 
+# Reddit collector communities (accessed via public RSS — keyless, compliant).
+# Inspired by the agent-reach toolkit's legitimate-channel approach.
+seed_reddit_subreddits:
+  - { sub: "sportscards", source_type: "collector forum", verticals: ["Trading Cards", "Sports Memorabilia"] }
+  - { sub: "basketballcards", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "footballcards", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "baseballcards", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "hockeycards", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "pkmntcg", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "PokemonTCG", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "mtgfinance", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "yugioh", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "OnePieceTCG", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "Lorcana", source_type: "collector forum", verticals: ["Trading Cards"] }
+  - { sub: "coins", source_type: "collector forum", verticals: ["Coins"] }
+  - { sub: "Numismatics", source_type: "collector forum", verticals: ["Coins"] }
+  - { sub: "comicbooks", source_type: "collector forum", verticals: ["Comic Books and Memorabilia"] }
+  - { sub: "comicbookcollecting", source_type: "collector forum", verticals: ["Comic Books and Memorabilia"] }
+  - { sub: "funkopop", source_type: "collector forum", verticals: ["Toys and Hobbies"] }
+  - { sub: "lego", source_type: "collector forum", verticals: ["Toys and Hobbies"] }
+  - { sub: "ActionFigures", source_type: "collector forum", verticals: ["Toys and Hobbies"] }
+  - { sub: "vinyl", source_type: "collector forum", verticals: ["Vinyl Records"] }
+  - { sub: "VinylReleases", source_type: "collector forum", verticals: ["Vinyl Records"] }
+  - { sub: "Watches", source_type: "collector forum", verticals: ["Watches"] }
+  - { sub: "collectibles", source_type: "collector forum", verticals: ["Collectibles"] }
+
+# YouTube channels via OFFICIAL, keyless RSS feeds
+# (https://www.youtube.com/feeds/videos.xml?channel_id=...). This is a sanctioned
+# feed, not scraping. Add collectible channels by their channel_id. Empty by default.
+seed_youtube_channels: []
+#  - { channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx", source_type: "social/news aggregation", verticals: ["Trading Cards"] }
+
 seed_urls:
   - url: "https://www.paniniamerica.net/"
     source_type: "official manufacturer"
@@ -318,6 +350,9 @@ url_discovery:
   enable_marketing_page_discovery: true
   enable_release_calendar_discovery: true
   enable_event_calendar_discovery: true
+  enable_reddit_discovery: true    # keyless collector-community RSS (agent-reach style)
+  enable_hn_discovery: true        # keyless Hacker News Algolia search
+  enable_youtube_discovery: true   # OFFICIAL YouTube channel RSS only (no scraping)
   relevance_threshold: 0.15        # low threshold = high recall
 
 # ---------------------------------------------------------------------------
@@ -342,6 +377,10 @@ search_providers:
     enabled: true                  # free, no key
   wikidata:
     enabled: true                  # free, no key
+  reddit:
+    enabled: true                  # public RSS only (keyless, compliant)
+  hackernews:
+    enabled: true                  # Algolia public API (keyless)
 
 # ---------------------------------------------------------------------------
 # Scraping / rendering
@@ -357,6 +396,8 @@ scraping:
   user_agent: "EmergingCollectiblesIntelligenceBot/1.0 (+research; respects robots.txt)"
   use_playwright: false
   use_camoufox: false
+  use_jina_reader: false            # optional public URL→markdown reader (agent-reach style);
+  jina_api_key_env: "JINA_API_KEY"  # needs a (free-tier) key; used as a compliant fetch fallback
   max_bytes_per_page: 3000000
   retry_on_network_error: 2
 

@@ -12,6 +12,7 @@ from ..logging_config import get_logger
 from ..models import FetchedPage
 from ..scraping.camoufox_fetcher import CamoufoxFetcher
 from ..scraping.http_fetcher import HTTPFetcher
+from ..scraping.jina_fetcher import JinaReaderFetcher
 from ..scraping.parsers import parse_soup, extract_jsonld
 from ..scraping.playwright_fetcher import PlaywrightFetcher
 from ..util import registered_domain
@@ -47,9 +48,11 @@ class ScrapingAgent:
         self.http = HTTPFetcher(config)
         self.playwright = PlaywrightFetcher(config)
         self.camoufox = CamoufoxFetcher(config)
+        self.jina = JinaReaderFetcher(config)
 
     def close(self):
         self.http.close()
+        self.jina.close()
 
     def _apply_strategy(self, strategy: str, url: str) -> FetchedPage:
         if strategy in ("httpx+trafilatura", "readability", "jsonld"):
@@ -58,6 +61,8 @@ class ScrapingAgent:
                 # jsonld strategy but none present — still fine, text used
                 pass
             return page
+        if strategy == "jina_reader":
+            return self.jina.fetch(url)
         if strategy == "playwright":
             return self.playwright.fetch(url)
         if strategy == "camoufox":

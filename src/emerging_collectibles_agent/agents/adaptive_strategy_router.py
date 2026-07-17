@@ -17,6 +17,7 @@ DEFAULT_STRATEGY_ORDER = [
     "httpx+trafilatura",
     "jsonld",
     "readability",
+    "jina_reader",
     "playwright",
     "camoufox",
 ]
@@ -89,6 +90,7 @@ class AdaptiveStrategyRouter:
         self.max_fail_before_alt = float(conf.get("max_failure_rate_before_alternative_source", 0.70))
         self.use_playwright = bool(config.get("scraping.use_playwright", False))
         self.use_camoufox = bool(config.get("scraping.use_camoufox", False))
+        self.use_jina = bool(config.get("scraping.use_jina_reader", False))
         self.registry = StrategyRegistry(db)
 
     def select(self, url: str, domain: str, source_type: str = "") -> dict:
@@ -105,6 +107,8 @@ class AdaptiveStrategyRouter:
             if s == "playwright" and not self.use_playwright:
                 continue
             if s == "camoufox" and not self.use_camoufox:
+                continue
+            if s == "jina_reader" and not self.use_jina:
                 continue
             filtered.append(s)
         if not filtered:
