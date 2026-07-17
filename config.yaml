@@ -239,13 +239,154 @@ seed_youtube_channels: []
 #  - { channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx", source_type: "social/news aggregation", verticals: ["Trading Cards"] }
 
 seed_urls:
-  - url: "https://www.paniniamerica.net/"
-    source_type: "official manufacturer"
+  - url: "https://www.cardboardconnection.com/"
+    source_type: "hobby publication"
     verticals: ["Trading Cards"]
+  - url: "https://www.beckett.com/"
+    source_type: "price guide"
+    verticals: ["Trading Cards"]
+  - url: "https://www.sportscollectorsdaily.com/"
+    source_type: "hobby publication"
+    verticals: ["Trading Cards", "Sports Memorabilia"]
+  - url: "https://www.blowoutbuzz.com/"
+    source_type: "collector forum"
+    verticals: ["Trading Cards"]
+  - url: "https://www.pokebeach.com/"
+    source_type: "hobby publication"
+    verticals: ["Trading Cards"]
+  - url: "https://www.tcgplayer.com/"
+    source_type: "public marketplace"
+    verticals: ["Trading Cards"]
+  - url: "https://www.gemrate.com/"
+    source_type: "price guide"
+    verticals: ["Trading Cards"]
+  - url: "https://www.sportscardinvestor.com/"
+    source_type: "price guide"
+    verticals: ["Trading Cards"]
+  - url: "https://www.psacard.com/"
+    source_type: "grading company"
+    verticals: ["Trading Cards"]
+  - url: "https://www.cgccomics.com/"
+    source_type: "grading company"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.pcgs.com/"
+    source_type: "grading company"
+    verticals: ["Coins"]
+  - url: "https://www.ngccoin.com/"
+    source_type: "grading company"
+    verticals: ["Coins"]
+  - url: "https://www.sgccard.com/"
+    source_type: "grading company"
+    verticals: ["Trading Cards"]
+  - url: "https://www.coinworld.com/"
+    source_type: "hobby publication"
+    verticals: ["Coins"]
+  - url: "https://www.numismaticnews.net/"
+    source_type: "hobby publication"
+    verticals: ["Coins"]
+  - url: "https://www.greysheet.com/"
+    source_type: "price guide"
+    verticals: ["Coins"]
+  - url: "https://www.cbr.com/"
+    source_type: "entertainment news"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.bleedingcool.com/"
+    source_type: "entertainment news"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.comicbook.com/"
+    source_type: "entertainment news"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.gocollect.com/"
+    source_type: "price guide"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.previewsworld.com/"
+    source_type: "release calendar"
+    verticals: ["Comic Books and Memorabilia"]
+  - url: "https://www.toybook.com/"
+    source_type: "hobby publication"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.brickset.com/"
+    source_type: "hobby publication"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.bigbadtoystore.com/"
+    source_type: "public marketplace"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.toyark.com/"
+    source_type: "hobby publication"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.funko.com/"
+    source_type: "official manufacturer"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.lego.com/"
+    source_type: "official manufacturer"
+    verticals: ["Toys and Hobbies"]
+  - url: "https://www.discogs.com/"
+    source_type: "public marketplace"
+    verticals: ["Vinyl Records"]
+  - url: "https://www.pitchfork.com/"
+    source_type: "entertainment news"
+    verticals: ["Vinyl Records"]
+  - url: "https://www.recordstoreday.com/"
+    source_type: "release calendar"
+    verticals: ["Vinyl Records"]
+  - url: "https://www.thevinylfactory.com/"
+    source_type: "hobby publication"
+    verticals: ["Vinyl Records"]
+  - url: "https://www.vinylmeplease.com/"
+    source_type: "public marketplace"
+    verticals: ["Vinyl Records"]
+  - url: "https://www.hodinkee.com/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.fratellowatches.com/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.ablogtowatch.com/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.monochrome-watches.com/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.watchpro.com/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.ha.com/"
+    source_type: "auction house"
+    verticals: ["Trading Cards", "Comic Books and Memorabilia", "Coins", "Entertainment Memorabilia"]
+  - url: "https://www.goldin.co/"
+    source_type: "auction house"
+    verticals: ["Sports Memorabilia", "Trading Cards"]
+  - url: "https://www.pwccmarketplace.com/"
+    source_type: "auction house"
+    verticals: ["Trading Cards", "Sports Memorabilia"]
+  - url: "https://www.propstore.com/"
+    source_type: "auction house"
+    verticals: ["Entertainment Memorabilia"]
+  - url: "https://www.julienslive.com/"
+    source_type: "auction house"
+    verticals: ["Entertainment Memorabilia", "Autographs"]
+  - url: "https://www.liveauctioneers.com/"
+    source_type: "auction house"
+    verticals: ["Collectibles"]
+  - url: "https://www.invaluable.com/"
+    source_type: "auction house"
+    verticals: ["Collectibles"]
+  - url: "https://www.catawiki.com/"
+    source_type: "public marketplace"
+    verticals: ["Collectibles"]
+  - url: "https://www.robertedwardauctions.com/"
+    source_type: "auction house"
+    verticals: ["Sports Memorabilia"]
   - url: "https://www.topps.com/"
     source_type: "official manufacturer"
     verticals: ["Trading Cards"]
-  - url: "https://www.pokemon.com/us/pokemon-tcg/"
+  - url: "https://www.paniniamerica.net/"
+    source_type: "official manufacturer"
+    verticals: ["Trading Cards"]
+  - url: "https://www.pokemon.com/"
+    source_type: "official manufacturer"
+    verticals: ["Trading Cards"]
+  - url: "https://www.upperdeck.com/"
     source_type: "official manufacturer"
     verticals: ["Trading Cards"]
 
