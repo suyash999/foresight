@@ -12,6 +12,18 @@ external_only_mode: true
 timezone: "Asia/Kolkata"          # IST reference; UTC always also recorded
 
 # ---------------------------------------------------------------------------
+# Network / outbound proxy. On Krylov, set apply_proxy_env: true so the crawler
+# routes outbound HTTPS through eBay's proxy (lets Krylov "hit the net").
+# Leave false elsewhere (the crawler then uses the machine's normal network /
+# any HTTP(S)_PROXY already in the environment).
+# ---------------------------------------------------------------------------
+network:
+  apply_proxy_env: false
+  http_proxy: "http://httpproxy-tcop.vip.ebay.com:80"
+  https_proxy: "http://httpproxy-tcop.vip.ebay.com:80"
+  no_proxy: "localhost,127.0.0.1,::1"
+
+# ---------------------------------------------------------------------------
 # Runtime / worker
 # ---------------------------------------------------------------------------
 runtime:
@@ -594,7 +606,7 @@ hive_sink:
   username_env: "KRYLOV_PRINCIPAL"     # Kerberos principal from env (no secrets in code)
   database: "P_UK_PLAN_REPORT_T"
   table: "foresight1"
-  write_mode: "replace"                # replace = mirror latest master CSV; append = keep history
+  write_mode: "append"                 # append = keep dated history in Hermes; replace = mirror latest
   batch_size: 50
   clear_csv_after_write: true          # empty master CSV once rows are safely in Hive
 

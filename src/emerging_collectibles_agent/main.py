@@ -20,9 +20,31 @@ from .logging_config import get_logger, setup_logging
 log = get_logger("main")
 
 
+def _apply_network_proxy(config):
+    """If configured (Krylov), set HTTP(S)_PROXY in the environment BEFORE any
+    HTTP client is created, so all outbound crawling routes through the proxy.
+    httpx/requests/urllib read these from the environment automatically."""
+    net = config.get("network", {})
+    if not net.get("apply_proxy_env", False):
+        return
+    hp = net.get("http_proxy", "")
+    hsp = net.get("https_proxy", hp)
+    if hp:
+        os.environ["HTTP_PROXY"] = hp
+        os.environ["http_proxy"] = hp
+    if hsp:
+        os.environ["HTTPS_PROXY"] = hsp
+        os.environ["https_proxy"] = hsp
+    if net.get("no_proxy"):
+        os.environ["NO_PROXY"] = net["no_proxy"]
+        os.environ["no_proxy"] = net["no_proxy"]
+    log.info("Outbound proxy applied from config: %s", hsp or hp)
+
+
 def _cmd_run_once(args):
     from .orchestrator import Orchestrator
     config = load_config(args.config)
+    _apply_network_proxy(config)
     orch = Orchestrator(config)
     try:
         result = orch.run_cycle()
@@ -42,12 +64,14 @@ def _cmd_run_once(args):
 def _cmd_run_forever(args):
     from .scheduler import Scheduler
     config = load_config(args.config)
+    _apply_network_proxy(config)
     Scheduler(config).run_forever()
 
 
 def _cmd_export(args):
     from .orchestrator import Orchestrator
     config = load_config(args.config)
+    _apply_network_proxy(config)
     orch = Orchestrator(config)
     try:
         # rebuild latest dataframe from product_dataframe snapshot
@@ -74,6 +98,7 @@ def _cmd_export(args):
 def _cmd_run_app(args):
     """Start the background worker and the Streamlit dashboard together."""
     config = load_config(args.config)
+    _apply_network_proxy(config)  # child processes inherit the proxied environment
     here = os.path.dirname(os.path.abspath(__file__))
     dashboard = os.path.join(here, "dashboard", "streamlit_app.py")
 
