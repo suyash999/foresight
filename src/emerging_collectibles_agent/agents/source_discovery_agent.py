@@ -1,0 +1,527 @@
+"""Source Discovery Agent — high-recall, multi-channel URL discovery.
+
+Channels (all external, eBay excluded, robots/compliance enforced downstream):
+  - RSS feeds (feedparser)
+  - Sitemaps (sitemap.xml / news sitemaps)
+  - GDELT global news-event API (free, no key)
+  - Wikipedia search API (free, no key)
+  - Wikidata search API (free, no key)
+  - Compliant search APIs (Google CSE / Bing / SerpAPI) when configured
+  - Recursive expansion from already-crawled credible pages
+
+Every discovered URL is logged with why it was selected/rejected so the
+dashboard's "URL Sourcing Intelligence" panel is fully observable. Discovery
+targets high recall: it iterates every vertical × query and enters a recovery
+mode if too few URLs are found.
+"""
+from __future__ import annotations
+
+import time
+from typing import Iterable, Optional
+
+import httpx
+
+# A discovery channel gives up after this many consecutive network failures
+# (treats the source as down for this cycle instead of timing out on every query).
+_CIRCUIT_BREAK_FAILS = 3
+
+from ..config import Config
+from ..logging_config import get_logger
+from ..models import DiscoveredURL
+from ..taxonomy import map_category, map_vertical
+from ..util import full_host, normalize_url, registered_domain
+
+log = get_logger("agent.discovery")
+
+
+class SourceDiscoveryAgent:
+    def __init__(self, config: Config, memory=None):
+        self.config = config
+        self.memory = memory  # SelfLearningMemory (optional), for source quality
+        ud = config.get("url_discovery", {})
+        self.min_urls = int(ud.get("min_urls_per_cycle", 500))
+        self.target_urls = int(ud.get("target_urls_per_cycle", 2000))
+        self.max_urls = int(ud.get("max_urls_per_cycle", 10000))
+        self.max_per_domain = int(ud.get("max_urls_per_domain_per_cycle", 100))
+        self.relevance_threshold = float(ud.get("relevance_threshold", 0.15))
+        self.ud = ud
+        self.sp = config.get("search_providers", {})
+        self.verticals = config.verticals
+        self.queries = config.get("seed_search_queries", {})
+        self.excluded = set(config.excluded_domains)
+        self.allowed = set(config.allowed_domains)
+        self.known_sources = config.get("known_sources", {})
+        # fast-fail timeouts so a blocked/slow network never hangs a cycle
+        self.max_discovery_seconds = float(ud.get("max_discovery_seconds", 120))
+        self._client = httpx.Client(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=True,
+            headers={"User-Agent": config.get("scraping.user_agent",
+                                              "EmergingCollectiblesIntelligenceBot/1.0")},
+        )
+        # per-cycle accounting
+        self._domain_counts: dict[str, int] = {}
+        self._deadline: float = 0.0
+
+    def _time_left(self) -> bool:
+        return time.time() < self._deadline
+
+    def close(self):
+        try:
+            self._client.close()
+        except Exception:
+            pass
+
+    # -- domain gating ------------------------------------------------------
+    def _excluded_domain(self, domain: str) -> bool:
+        d = (domain or "").lower()
+        for ex in self.excluded:
+            if d == ex or d.endswith("." + ex) or ex in d:
+                return True
+        if self.allowed:
+            return not any(d == a or d.endswith("." + a) for a in self.allowed)
+        return False
+
+    def _source_type_for(self, domain: str, default: str) -> tuple[str, float]:
+        info = self.known_sources.get(domain)
+        if info:
+            return info.get("source_type", default), float(info.get("credibility", 0.6))
+        return default, 0.5
+
+    def _make_url(self, url: str, method: str, source: str, source_type: str,
+                  verticals_hint: Optional[list[str]] = None, seed_query: str = "",
+                  seed_url: str = "", title: str = "", snippet: str = "",
+                  published: str = "", depth: int = 0) -> Optional[DiscoveredURL]:
+        url = normalize_url(url)
+        if not url or not url.startswith("http"):
+            return None
+        domain = registered_domain(url)
+        d = DiscoveredURL(
+            url=url, domain=domain, discovery_method=method, discovery_source=source,
+            seed_query=seed_query, seed_url=seed_url, title=title, snippet=snippet,
+            published_at=published or None, depth=depth,
+        )
+        # domain gating
+        if self._excluded_domain(domain):
+            d.selection_status = "rejected"
+            d.rejection_reason = "excluded_domain (eBay/external-only policy)"
+            d.crawl_allowed = False
+            return d
+        if self._domain_counts.get(domain, 0) >= self.max_per_domain:
+            d.selection_status = "rejected"
+            d.rejection_reason = "max_urls_per_domain_per_cycle reached"
+            return d
+        # source type / credibility hint
+        st, cred = self._source_type_for(domain, source_type)
+        d.source_type = st
+        d.credibility_score = cred
+        # vertical mapping from title+snippet (fallback to hint)
+        text = f"{title} {snippet}"
+        vertical, vscore, _ = map_vertical(text, self.verticals)
+        if not vertical and verticals_hint:
+            vertical = verticals_hint[0]
+            vscore = 0.35
+        d.mapped_vertical = vertical
+        d.mapped_category = map_category(text, vertical)
+        d.relevance_score = round(max(vscore, 0.2 if verticals_hint else 0.0), 3)
+        # priority: relevance * credibility, with source-quality memory nudge
+        qual = 1.0
+        if self.memory is not None:
+            qual = self.memory.domain_priority_multiplier(domain)
+        d.priority_score = round(d.relevance_score * (0.5 + 0.5 * cred) * qual, 4)
+        # selection decision (high recall: low threshold)
+        if d.relevance_score >= self.relevance_threshold or verticals_hint:
+            d.selection_status = "selected"
+            d.selection_reason = (
+                f"relevance={d.relevance_score} vertical={vertical or 'n/a'} "
+                f"source_type={st} cred={cred}"
+            )
+            self._domain_counts[domain] = self._domain_counts.get(domain, 0) + 1
+        else:
+            d.selection_status = "rejected"
+            d.rejection_reason = f"relevance {d.relevance_score} < threshold {self.relevance_threshold}"
+        return d
+
+    # -- channel: RSS -------------------------------------------------------
+    def _from_rss(self) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_rss_discovery", True) or not self.sp.get("rss", {}).get("enabled", True):
+            return []
+        out: list[DiscoveredURL] = []
+        feeds = self.config.get("seed_rss_feeds", [])
+        try:
+            import feedparser
+        except Exception:
+            return out
+        fails = 0
+        for feed in feeds:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS + 2:
+                break
+            furl = feed.get("url") if isinstance(feed, dict) else feed
+            st = feed.get("source_type", "news") if isinstance(feed, dict) else "news"
+            vh = feed.get("verticals") if isinstance(feed, dict) else None
+            try:
+                resp = self._client.get(furl)
+                parsed = feedparser.parse(resp.content)
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("RSS fetch failed %s: %s", furl, exc)
+                continue
+            for entry in parsed.entries[:60]:
+                link = entry.get("link", "")
+                title = entry.get("title", "")
+                summary = entry.get("summary", "")[:400]
+                pub = entry.get("published", "") or entry.get("updated", "")
+                du = self._make_url(link, "rss", furl, st, vh, title=title,
+                                    snippet=summary, published=pub)
+                if du:
+                    out.append(du)
+        log.info("RSS discovered %d urls from %d feeds", len(out), len(feeds))
+        return out
+
+    # -- channel: sitemaps --------------------------------------------------
+    def _from_sitemaps(self) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_sitemap_discovery", True):
+            return []
+        out: list[DiscoveredURL] = []
+        sitemaps = self.config.get("seed_sitemaps", [])
+        for sm in sitemaps:
+            if not self._time_left():
+                break
+            surl = sm.get("url") if isinstance(sm, dict) else sm
+            st = sm.get("source_type", "unknown") if isinstance(sm, dict) else "unknown"
+            vh = sm.get("verticals") if isinstance(sm, dict) else None
+            try:
+                resp = self._client.get(surl)
+                from bs4 import BeautifulSoup
+
+                soup = BeautifulSoup(resp.content, "xml")
+                locs = [l.get_text() for l in soup.find_all("loc")][:200]
+            except Exception as exc:
+                log.debug("sitemap fetch failed %s: %s", surl, exc)
+                continue
+            for loc in locs:
+                du = self._make_url(loc, "sitemap", surl, st, vh)
+                if du:
+                    out.append(du)
+        log.info("Sitemap discovered %d urls", len(out))
+        return out
+
+    # -- channel: GDELT -----------------------------------------------------
+    def _from_gdelt(self, queries: list[tuple[str, str]]) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_gdelt_discovery", True) or not self.sp.get("gdelt", {}).get("enabled", True):
+            return []
+        out: list[DiscoveredURL] = []
+        base = "https://api.gdeltproject.org/api/v2/doc/doc"
+        fails = 0
+        for vertical, query in queries:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
+            params = {
+                "query": query + " sourcelang:english",
+                "mode": "ArtList",
+                "maxrecords": "40",
+                "format": "json",
+                "sort": "DateDesc",
+            }
+            try:
+                resp = self._client.get(base, params=params)
+                if resp.status_code != 200:
+                    fails += 1
+                    continue
+                data = resp.json()
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("GDELT failed for %s: %s", query, exc)
+                continue
+            for art in data.get("articles", [])[:40]:
+                url = art.get("url", "")
+                title = art.get("title", "")
+                pub = art.get("seendate", "")
+                du = self._make_url(url, "gdelt", query, "general news", [vertical],
+                                    seed_query=query, title=title, published=pub)
+                if du:
+                    out.append(du)
+            time.sleep(0.3)  # be polite to GDELT
+        log.info("GDELT discovered %d urls", len(out))
+        return out
+
+    # -- channel: Wikipedia -------------------------------------------------
+    def _from_wikipedia(self, queries: list[tuple[str, str]]) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_wikipedia_discovery", True) or not self.sp.get("wikipedia", {}).get("enabled", True):
+            return []
+        out: list[DiscoveredURL] = []
+        api = "https://en.wikipedia.org/w/api.php"
+        fails = 0
+        for vertical, query in queries:
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
+            params = {
+                "action": "query", "list": "search", "srsearch": query,
+                "format": "json", "srlimit": "10",
+            }
+            try:
+                resp = self._client.get(api, params=params)
+                if resp.status_code != 200:
+                    fails += 1
+                    continue
+                data = resp.json()
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("Wikipedia failed for %s: %s", query, exc)
+                continue
+            for hit in data.get("query", {}).get("search", []):
+                title = hit.get("title", "")
+                page_url = "https://en.wikipedia.org/wiki/" + title.replace(" ", "_")
+                snippet = hit.get("snippet", "")[:300]
+                du = self._make_url(page_url, "wikipedia", query, "social/news aggregation",
+                                    [vertical], seed_query=query, title=title, snippet=snippet)
+                if du:
+                    out.append(du)
+        log.info("Wikipedia discovered %d urls", len(out))
+        return out
+
+    # -- channel: Wikidata --------------------------------------------------
+    def _from_wikidata(self, queries: list[tuple[str, str]]) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_wikidata_discovery", True) or not self.sp.get("wikidata", {}).get("enabled", True):
+            return []
+        out: list[DiscoveredURL] = []
+        api = "https://www.wikidata.org/w/api.php"
+        fails = 0
+        for vertical, query in queries[:20]:  # wikidata entity search is coarse
+            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
+                break
+            params = {
+                "action": "wbsearchentities", "search": query, "language": "en",
+                "format": "json", "limit": "5",
+            }
+            try:
+                resp = self._client.get(api, params=params)
+                if resp.status_code != 200:
+                    fails += 1
+                    continue
+                data = resp.json()
+                fails = 0
+            except Exception as exc:
+                fails += 1
+                log.debug("Wikidata failed for %s: %s", query, exc)
+                continue
+            for hit in data.get("search", []):
+                concept = hit.get("concepturi", "")
+                label = hit.get("label", "")
+                desc = hit.get("description", "")
+                du = self._make_url(concept, "wikidata", query, "social/news aggregation",
+                                    [vertical], seed_query=query, title=label, snippet=desc)
+                if du:
+                    out.append(du)
+        log.info("Wikidata discovered %d urls", len(out))
+        return out
+
+    # -- channel: compliant search APIs -------------------------------------
+    def _from_search_apis(self, queries: list[tuple[str, str]]) -> list[DiscoveredURL]:
+        if not self.ud.get("enable_search_api_discovery", True):
+            return []
+        out: list[DiscoveredURL] = []
+        out += self._google_cse(queries)
+        out += self._bing(queries)
+        out += self._serpapi(queries)
+        return out
+
+    def _google_cse(self, queries) -> list[DiscoveredURL]:
+        conf = self.sp.get("google_custom_search", {})
+        if not conf.get("enabled"):
+            return []
+        key = self.config.env(conf.get("api_key_env", "GOOGLE_CUSTOM_SEARCH_API_KEY"))
+        cx = self.config.env(conf.get("cx_env", "GOOGLE_CUSTOM_SEARCH_CX"))
+        if not key or not cx:
+            return []
+        out = []
+        for vertical, query in queries:
+            try:
+                resp = self._client.get("https://www.googleapis.com/customsearch/v1",
+                                        params={"key": key, "cx": cx, "q": query, "num": 10})
+                data = resp.json()
+            except Exception:
+                continue
+            for item in data.get("items", []):
+                du = self._make_url(item.get("link", ""), "search_api", "google_cse",
+                                    "unknown", [vertical], seed_query=query,
+                                    title=item.get("title", ""), snippet=item.get("snippet", ""))
+                if du:
+                    out.append(du)
+        return out
+
+    def _bing(self, queries) -> list[DiscoveredURL]:
+        conf = self.sp.get("bing", {})
+        if not conf.get("enabled"):
+            return []
+        key = self.config.env(conf.get("api_key_env", "BING_SEARCH_API_KEY"))
+        if not key:
+            return []
+        out = []
+        for vertical, query in queries:
+            try:
+                resp = self._client.get(
+                    "https://api.bing.microsoft.com/v7.0/search",
+                    params={"q": query, "count": 10},
+                    headers={"Ocp-Apim-Subscription-Key": key},
+                )
+                data = resp.json()
+            except Exception:
+                continue
+            for item in data.get("webPages", {}).get("value", []):
+                du = self._make_url(item.get("url", ""), "search_api", "bing",
+                                    "unknown", [vertical], seed_query=query,
+                                    title=item.get("name", ""), snippet=item.get("snippet", ""))
+                if du:
+                    out.append(du)
+        return out
+
+    def _serpapi(self, queries) -> list[DiscoveredURL]:
+        conf = self.sp.get("serpapi", {})
+        if not conf.get("enabled"):
+            return []
+        key = self.config.env(conf.get("api_key_env", "SERPAPI_API_KEY"))
+        if not key:
+            return []
+        out = []
+        for vertical, query in queries:
+            try:
+                resp = self._client.get("https://serpapi.com/search",
+                                        params={"q": query, "api_key": key, "num": 10})
+                data = resp.json()
+            except Exception:
+                continue
+            for item in data.get("organic_results", []):
+                du = self._make_url(item.get("link", ""), "search_api", "serpapi",
+                                    "unknown", [vertical], seed_query=query,
+                                    title=item.get("title", ""), snippet=item.get("snippet", ""))
+                if du:
+                    out.append(du)
+        return out
+
+    # -- channel: seed URLs -------------------------------------------------
+    def _from_seeds(self) -> list[DiscoveredURL]:
+        out = []
+        for seed in self.config.get("seed_urls", []):
+            surl = seed.get("url") if isinstance(seed, dict) else seed
+            st = seed.get("source_type", "unknown") if isinstance(seed, dict) else "unknown"
+            vh = seed.get("verticals") if isinstance(seed, dict) else None
+            du = self._make_url(surl, "seed", "config", st, vh)
+            if du:
+                out.append(du)
+        return out
+
+    # -- recursive expansion ------------------------------------------------
+    def expand_links(self, links: Iterable[str], parent_url: str, parent_vertical: str,
+                     depth: int) -> list[DiscoveredURL]:
+        max_depth = int(self.ud.get("max_recursion_depth", 3))
+        if depth > max_depth or not self.ud.get("enable_recursive_expansion", True):
+            return []
+        out = []
+        parent_domain = registered_domain(parent_url)
+        for link in links:
+            du = self._make_url(link, "recursive", parent_url, "unknown",
+                                [parent_vertical] if parent_vertical else None,
+                                seed_url=parent_url, depth=depth)
+            if du and du.selection_status == "selected":
+                # slightly downweight same-domain link farms
+                if registered_domain(link) == parent_domain:
+                    du.priority_score *= 0.7
+                out.append(du)
+        return out
+
+    # -- query set builder --------------------------------------------------
+    def _query_pairs(self) -> list[tuple[str, str]]:
+        pairs: list[tuple[str, str]] = []
+        for vertical in self.verticals:
+            for q in self.queries.get(vertical, []):
+                pairs.append((vertical, q))
+        return pairs
+
+    def _expanded_query_pairs(self) -> list[tuple[str, str]]:
+        """Recovery mode: broaden queries with extra modifiers."""
+        modifiers = ["news", "release date", "auction", "sold out", "preorder",
+                     "limited edition", "trending 2026", "market"]
+        pairs = []
+        for vertical in self.verticals:
+            base_terms = self.queries.get(vertical, [vertical.lower()])
+            for term in base_terms[:3]:
+                for mod in modifiers:
+                    pairs.append((vertical, f"{term} {mod}"))
+        return pairs
+
+    # -- main entrypoint ----------------------------------------------------
+    def discover(self, recovery: bool = True) -> list[DiscoveredURL]:
+        self._domain_counts = {}
+        self._deadline = time.time() + self.max_discovery_seconds
+        results: list[DiscoveredURL] = []
+        queries = self._query_pairs()
+
+        results += self._from_seeds()
+        results += self._from_rss()
+        results += self._from_sitemaps()
+        results += self._from_gdelt(queries)
+        results += self._from_wikipedia(queries)
+        results += self._from_wikidata(queries)
+        results += self._from_search_apis(queries)
+
+        selected = [r for r in results if r.selection_status == "selected"]
+        log.info("Discovery pass 1: %d total, %d selected", len(results), len(selected))
+
+        # Recovery mode if under min threshold
+        if recovery and len(selected) < self.min_urls:
+            log.warning("URL discovery recovery mode: %d < min %d — expanding queries",
+                        len(selected), self.min_urls)
+            exp = self._expanded_query_pairs()
+            results += self._from_gdelt(exp)
+            results += self._from_wikipedia(exp)
+            results += self._from_search_apis(exp)
+
+        # Deduplicate by URL, keep highest priority
+        deduped = self._dedupe(results)
+        # cap
+        selected_final = [r for r in deduped if r.selection_status == "selected"]
+        if len(selected_final) > self.max_urls:
+            selected_final.sort(key=lambda r: r.priority_score, reverse=True)
+            keep = set(id(r) for r in selected_final[: self.max_urls])
+            for r in deduped:
+                if r.selection_status == "selected" and id(r) not in keep:
+                    r.selection_status = "rejected"
+                    r.rejection_reason = "over max_urls_per_cycle (kept top-priority)"
+        return deduped
+
+    def _dedupe(self, urls: list[DiscoveredURL]) -> list[DiscoveredURL]:
+        seen: dict[str, DiscoveredURL] = {}
+        order: list[DiscoveredURL] = []
+        for u in urls:
+            key = u.url
+            if key in seen:
+                u.duplicate_flag = True
+                u.selection_status = "duplicate"
+                u.rejection_reason = "duplicate url"
+                # keep best priority on the retained one
+                if u.priority_score > seen[key].priority_score:
+                    seen[key].priority_score = u.priority_score
+                order.append(u)
+            else:
+                seen[key] = u
+                order.append(u)
+        return order
+
+    # -- coverage metrics ---------------------------------------------------
+    def coverage(self, urls: list[DiscoveredURL]) -> dict:
+        selected = [u for u in urls if u.selection_status == "selected"]
+        verticals_hit = {u.mapped_vertical for u in selected if u.mapped_vertical}
+        source_types = {u.source_type for u in selected if u.source_type}
+        vc = len(verticals_hit) / max(1, len(self.verticals))
+        return {
+            "discovered": len(urls),
+            "selected": len(selected),
+            "vertical_coverage_score": round(vc, 3),
+            "verticals_hit": sorted(verticals_hit),
+            "unique_source_types": len(source_types),
+            "url_diversity_score": round(len(source_types) / 12.0, 3),
+        }

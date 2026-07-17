@@ -1,0 +1,549 @@
+# =============================================================================
+# External Emerging Collectibles Intelligence Agent — configuration
+# =============================================================================
+# Everything is configurable here. The system runs fully in deterministic,
+# no-LLM, external-only mode with the defaults below. eBay is excluded by
+# default. New verticals / sports / sources / taxonomies can be added here
+# WITHOUT touching code.
+# =============================================================================
+
+run_reference: 9839
+external_only_mode: true
+timezone: "Asia/Kolkata"          # IST reference; UTC always also recorded
+
+# ---------------------------------------------------------------------------
+# Runtime / worker
+# ---------------------------------------------------------------------------
+runtime:
+  mode: "continuous"              # one-shot | continuous | scheduled
+  auto_start_worker: true
+  crawl_interval_seconds: 900     # sleep between cycles in continuous mode
+  dashboard_auto_refresh_seconds: 30
+  worker_heartbeat_seconds: 15
+  stale_worker_threshold_seconds: 120
+  max_cycles: 0                   # 0 = unlimited (continuous)
+
+# ---------------------------------------------------------------------------
+# Verticals (fully configurable)
+# ---------------------------------------------------------------------------
+verticals:
+  - "Trading Cards"
+  - "Coins"
+  - "Collectibles"
+  - "Comic Books and Memorabilia"
+  - "Toys and Hobbies"
+  - "Vinyl Records"
+  - "Watches"
+  - "Sports Memorabilia"
+  - "Entertainment Memorabilia"
+  - "Autographs"
+
+vertical_coverage:
+  require_all_verticals_each_cycle: true
+  min_urls_per_vertical: 100
+
+# ---------------------------------------------------------------------------
+# Taxonomy: categories / subcategories / sports / franchises
+# ---------------------------------------------------------------------------
+taxonomy:
+  categories:
+    "Trading Cards":
+      - "Baseball cards"
+      - "Basketball cards"
+      - "Football cards"
+      - "Soccer cards"
+      - "Hockey cards"
+      - "Formula 1 cards"
+      - "UFC cards"
+      - "WWE cards"
+      - "Pokemon cards"
+      - "Magic: The Gathering"
+      - "Yu-Gi-Oh!"
+      - "One Piece TCG"
+      - "Lorcana"
+      - "Marvel cards"
+      - "Star Wars cards"
+      - "Entertainment cards"
+      - "Graded cards"
+      - "Sealed boxes"
+    "Coins": ["Rare coins", "Commemorative coins", "Bullion", "Ancient coins", "Error coins", "Graded coins"]
+    "Collectibles": ["General collectibles", "Pop culture", "Limited editions"]
+    "Comic Books and Memorabilia": ["Key issues", "Graded comics", "Modern comics", "Golden age", "Silver age", "Movie memorabilia"]
+    "Toys and Hobbies": ["Action figures", "LEGO", "Funko Pop", "Model kits", "Die-cast", "Plush"]
+    "Vinyl Records": ["Reissues", "Limited pressings", "Record Store Day", "Original pressings", "Colored vinyl"]
+    "Watches": ["Luxury watches", "Vintage watches", "Limited edition watches", "Discontinued references"]
+    "Sports Memorabilia": ["Signed jerseys", "Game-used", "Championship items", "Rookie collectibles"]
+    "Entertainment Memorabilia": ["Props", "Posters", "Autographed items", "Convention exclusives"]
+    "Autographs": ["Sports autographs", "Entertainment autographs", "Historical autographs"]
+
+  subcategories:
+    product_types:
+      - "Hobby box"
+      - "Blaster box"
+      - "Retail box"
+      - "Booster box"
+      - "Pack"
+      - "Case"
+      - "Sealed product"
+      - "Single card"
+      - "Autograph card"
+      - "Rookie card"
+      - "Parallel card"
+      - "Short print"
+      - "Serial-numbered card"
+      - "Limited release"
+      - "Graded slab"
+
+  sports:
+    - "Baseball"
+    - "Basketball"
+    - "Football"
+    - "Soccer"
+    - "Hockey"
+    - "Formula 1"
+    - "UFC"
+    - "WWE"
+    - "Cricket"
+    - "Tennis"
+    - "Golf"
+    - "Olympics"
+
+  franchises:
+    - "Pokemon"
+    - "Magic: The Gathering"
+    - "Yu-Gi-Oh!"
+    - "One Piece"
+    - "Lorcana"
+    - "Marvel"
+    - "DC"
+    - "Star Wars"
+    - "Disney"
+    - "Harry Potter"
+    - "Star Trek"
+
+# ---------------------------------------------------------------------------
+# Source domain exclusion / inclusion
+# ---------------------------------------------------------------------------
+excluded_domains:
+  - "ebay.com"
+  - "ebay.co.uk"
+  - "ebay.de"
+  - "ebay.ca"
+  - "ebay.com.au"
+  - "ebayinc.com"
+  - "ebaystatic.com"
+  - "ebayimg.com"
+  - "befr.ebay.be"
+
+allowed_domains: []               # empty = allow all non-excluded (external-only)
+
+# ---------------------------------------------------------------------------
+# Seed URLs (RSS feeds, sitemaps, index pages). All external, non-eBay.
+# ---------------------------------------------------------------------------
+seed_rss_feeds:
+  # Trading cards / hobby
+  - url: "https://www.cardboardconnection.com/feed"
+    source_type: "hobby publication"
+    verticals: ["Trading Cards"]
+  - url: "https://www.sportscollectorsdaily.com/feed/"
+    source_type: "hobby publication"
+    verticals: ["Trading Cards", "Sports Memorabilia"]
+  - url: "https://www.beckett.com/news/feed/"
+    source_type: "price guide"
+    verticals: ["Trading Cards"]
+  # Comics / entertainment
+  - url: "https://www.cbr.com/feed/"
+    source_type: "entertainment news"
+    verticals: ["Comic Books and Memorabilia", "Entertainment Memorabilia"]
+  - url: "https://bleedingcool.com/feed/"
+    source_type: "entertainment news"
+    verticals: ["Comic Books and Memorabilia", "Toys and Hobbies"]
+  # Toys
+  - url: "https://toybook.com/feed/"
+    source_type: "hobby publication"
+    verticals: ["Toys and Hobbies"]
+  # Watches
+  - url: "https://www.hodinkee.com/feed"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  - url: "https://www.fratellowatches.com/feed/"
+    source_type: "hobby publication"
+    verticals: ["Watches"]
+  # Vinyl / music
+  - url: "https://pitchfork.com/feed/feed-news/rss"
+    source_type: "entertainment news"
+    verticals: ["Vinyl Records"]
+  # Coins
+  - url: "https://www.coinworld.com/rss.xml"
+    source_type: "hobby publication"
+    verticals: ["Coins"]
+  # Sports news (global)
+  - url: "https://www.espn.com/espn/rss/news"
+    source_type: "sports news"
+    verticals: ["Sports Memorabilia", "Trading Cards"]
+  - url: "https://feeds.bbci.co.uk/sport/rss.xml"
+    source_type: "sports news"
+    verticals: ["Sports Memorabilia", "Trading Cards"]
+  # Entertainment (global)
+  - url: "https://variety.com/feed/"
+    source_type: "entertainment news"
+    verticals: ["Entertainment Memorabilia", "Comic Books and Memorabilia"]
+
+seed_sitemaps:
+  - url: "https://www.cardboardconnection.com/sitemap.xml"
+    source_type: "hobby publication"
+    verticals: ["Trading Cards"]
+
+seed_urls:
+  - url: "https://www.paniniamerica.net/"
+    source_type: "official manufacturer"
+    verticals: ["Trading Cards"]
+  - url: "https://www.topps.com/"
+    source_type: "official manufacturer"
+    verticals: ["Trading Cards"]
+  - url: "https://www.pokemon.com/us/pokemon-tcg/"
+    source_type: "official manufacturer"
+    verticals: ["Trading Cards"]
+
+# Named external source examples supported through config (credibility hints)
+known_sources:
+  "paniniamerica.net": { source_type: "official manufacturer", credibility: 0.95 }
+  "topps.com": { source_type: "official manufacturer", credibility: 0.95 }
+  "fanaticscollect.com": { source_type: "public marketplace", credibility: 0.85 }
+  "psacard.com": { source_type: "grading company", credibility: 0.92 }
+  "beckett.com": { source_type: "price guide", credibility: 0.9 }
+  "cgccomics.com": { source_type: "grading company", credibility: 0.9 }
+  "sgccard.com": { source_type: "grading company", credibility: 0.88 }
+  "goldin.co": { source_type: "auction house", credibility: 0.9 }
+  "ha.com": { source_type: "auction house", credibility: 0.92 }
+  "pwccmarketplace.com": { source_type: "auction house", credibility: 0.88 }
+  "sportscollectorsdaily.com": { source_type: "hobby publication", credibility: 0.85 }
+  "cardboardconnection.com": { source_type: "hobby publication", credibility: 0.85 }
+  "blowoutforums.com": { source_type: "collector forum", credibility: 0.7 }
+  "tcgplayer.com": { source_type: "public marketplace", credibility: 0.85 }
+  "pokemon.com": { source_type: "official manufacturer", credibility: 0.95 }
+  "magic.wizards.com": { source_type: "official manufacturer", credibility: 0.95 }
+  "marvel.com": { source_type: "official manufacturer", credibility: 0.92 }
+  "dc.com": { source_type: "official manufacturer", credibility: 0.92 }
+  "lego.com": { source_type: "official manufacturer", credibility: 0.95 }
+  "funko.com": { source_type: "official manufacturer", credibility: 0.9 }
+  "hodinkee.com": { source_type: "hobby publication", credibility: 0.88 }
+  "coinworld.com": { source_type: "hobby publication", credibility: 0.88 }
+  "numismaticnews.net": { source_type: "hobby publication", credibility: 0.85 }
+  "discogs.com": { source_type: "public marketplace", credibility: 0.82 }
+  "espn.com": { source_type: "sports news", credibility: 0.85 }
+  "bbc.co.uk": { source_type: "general news", credibility: 0.88 }
+  "variety.com": { source_type: "entertainment news", credibility: 0.85 }
+  "cbr.com": { source_type: "entertainment news", credibility: 0.8 }
+  "bleedingcool.com": { source_type: "entertainment news", credibility: 0.78 }
+  "en.wikipedia.org": { source_type: "social/news aggregation", credibility: 0.75 }
+
+# ---------------------------------------------------------------------------
+# Search queries per vertical (used by search APIs + query-driven discovery)
+# ---------------------------------------------------------------------------
+seed_search_queries:
+  "Trading Cards":
+    - "upcoming trading card releases"
+    - "sports card release calendar"
+    - "Pokemon card upcoming set"
+    - "Topps release calendar"
+    - "Panini card release"
+    - "rookie card demand"
+    - "graded card market trend"
+  "Coins":
+    - "rare coin auction record"
+    - "upcoming coin release"
+    - "commemorative coin launch"
+    - "mint release calendar"
+    - "numismatic news"
+  "Comic Books and Memorabilia":
+    - "upcoming comic release"
+    - "key comic issue trending"
+    - "comic character anniversary"
+    - "graded comics auction record"
+    - "comic convention exclusives"
+  "Toys and Hobbies":
+    - "limited edition toy drop"
+    - "LEGO upcoming release"
+    - "Funko exclusive drop"
+    - "action figure preorder"
+    - "toy fair announcements"
+  "Vinyl Records":
+    - "vinyl reissue release"
+    - "record store day releases"
+    - "anniversary vinyl edition"
+    - "sold out vinyl pressing"
+  "Watches":
+    - "discontinued watch model"
+    - "limited edition watch release"
+    - "watch auction result"
+    - "new watch reference release"
+  "Sports Memorabilia":
+    - "athlete milestone memorabilia"
+    - "championship memorabilia"
+    - "signed jersey demand"
+    - "game-used memorabilia auction"
+  "Entertainment Memorabilia":
+    - "movie release memorabilia"
+    - "celebrity auction"
+    - "franchise anniversary collectibles"
+    - "prop auction"
+  "Autographs":
+    - "sports autograph demand"
+    - "celebrity autograph auction"
+  "Collectibles":
+    - "emerging collectible trend"
+    - "limited edition collectible drop"
+
+# ---------------------------------------------------------------------------
+# URL discovery budgets (high recall)
+# ---------------------------------------------------------------------------
+url_discovery:
+  min_urls_per_cycle: 500
+  target_urls_per_cycle: 2000
+  max_urls_per_cycle: 10000
+  min_urls_per_vertical: 100
+  max_urls_per_domain_per_cycle: 100
+  max_discovery_seconds: 120        # hard cap so a slow/blocked network never hangs a cycle
+  max_recursion_depth: 3
+  enable_recursive_expansion: true
+  enable_search_api_discovery: true
+  enable_gdelt_discovery: true
+  enable_rss_discovery: true
+  enable_sitemap_discovery: true
+  enable_wikipedia_discovery: true
+  enable_wikidata_discovery: true
+  enable_news_discovery: true
+  enable_retail_discovery: true
+  enable_marketing_page_discovery: true
+  enable_release_calendar_discovery: true
+  enable_event_calendar_discovery: true
+  relevance_threshold: 0.15        # low threshold = high recall
+
+# ---------------------------------------------------------------------------
+# Search providers (compliant APIs only; no direct SERP scraping)
+# ---------------------------------------------------------------------------
+search_providers:
+  google_custom_search:
+    enabled: false
+    api_key_env: "GOOGLE_CUSTOM_SEARCH_API_KEY"
+    cx_env: "GOOGLE_CUSTOM_SEARCH_CX"
+  bing:
+    enabled: false
+    api_key_env: "BING_SEARCH_API_KEY"
+  serpapi:
+    enabled: false
+    api_key_env: "SERPAPI_API_KEY"
+  gdelt:
+    enabled: true                  # free, no key
+  rss:
+    enabled: true
+  wikipedia:
+    enabled: true                  # free, no key
+  wikidata:
+    enabled: true                  # free, no key
+
+# ---------------------------------------------------------------------------
+# Scraping / rendering
+# ---------------------------------------------------------------------------
+scraping:
+  max_pages_per_cycle: 120
+  max_pages_per_domain: 20
+  max_crawl_depth: 3
+  request_timeout_seconds: 20
+  per_domain_delay_seconds: 2.0
+  global_max_concurrency: 6
+  respect_robots_txt: true
+  user_agent: "EmergingCollectiblesIntelligenceBot/1.0 (+research; respects robots.txt)"
+  use_playwright: false
+  use_camoufox: false
+  max_bytes_per_page: 3000000
+  retry_on_network_error: 2
+
+# ---------------------------------------------------------------------------
+# LLM (optional enhancement; deterministic fallback always available)
+# ---------------------------------------------------------------------------
+llm:
+  use_llm: false
+  provider: "openai"
+  model_env: "LLM_MODEL"
+  api_key_env: "LLM_API_KEY"
+  base_url_env: "LLM_BASE_URL"
+  max_retries: 1
+  timeout_seconds: 30
+  temperature: 0.1
+
+# ---------------------------------------------------------------------------
+# Event / seasonality intelligence
+# ---------------------------------------------------------------------------
+event_intelligence:
+  enabled: true
+  upcoming_event_window_days: 180
+  recent_event_window_days: 30
+  seasonality_enabled: true
+  event_to_product_mapping_enabled: true
+  require_event_source_evidence: true
+  no_hallucinated_dates: true
+  event_half_life_days:
+    sports_news: 14
+    product_release: 30
+    entertainment: 45
+    auction_market: 21
+    long_cycle: 90                 # watches / coins / vinyl
+
+# ---------------------------------------------------------------------------
+# Scoring: EPS weights (must sum to 1.0)
+# ---------------------------------------------------------------------------
+eps_weights:
+  freshness: 0.17
+  source_credibility: 0.13
+  mention_velocity: 0.14
+  source_diversity: 0.12
+  news_catalyst: 0.12
+  event_proximity: 0.10
+  marketplace_signal: 0.08
+  scarcity_signal: 0.06
+  release_signal: 0.05
+  ai_confidence: 0.03
+
+# VTM weights (must sum to 1.0)
+vtm_weights:
+  credible_source_coverage: 0.22
+  independent_confirmation: 0.18
+  mention_acceleration: 0.14
+  evidence_quality: 0.14
+  event_validation: 0.12
+  cross_category_catalyst: 0.08
+  recency_consistency: 0.07
+  noise_penalty_adjusted: 0.05
+
+scoring_params:
+  freshness_half_life_hours:
+    news_sensitive: 48
+    trading_cards: 72
+    long_cycle: 168                # watches / coins / vinyl / comics
+  recent_window_hours: 48
+  baseline_window_hours: 168
+  smoothing_factor: 1.0
+  target_source_type_count: 4
+  required_credible_sources: 3
+
+# Source credibility baselines by source type (0..1)
+source_credibility_baselines:
+  "official manufacturer": 0.95
+  "official league/team/personality/franchise source": 0.9
+  "auction house": 0.9
+  "grading company": 0.9
+  "public marketplace": 0.82
+  "hobby publication": 0.82
+  "price guide": 0.85
+  "sports news": 0.8
+  "entertainment news": 0.78
+  "general news": 0.8
+  "release calendar": 0.8
+  "collector forum": 0.65
+  "social/news aggregation": 0.7
+  "SEO article": 0.3
+  "unknown": 0.4
+
+# ---------------------------------------------------------------------------
+# Trend status thresholds
+# ---------------------------------------------------------------------------
+validation_thresholds:
+  strong_emerging: { eps: 75, vtm: 65 }
+  emerging_needs_validation: { eps: 70, vtm_below: 65 }
+  validated_momentum: { eps: 60, vtm: 75 }
+  watchlist_eps: [40, 69]
+  watchlist_vtm: [40, 64]
+  low_confidence: { eps_below: 40, vtm_below: 40 }
+  false_positive: { eps: 70, vtm_below: 35 }
+
+# ---------------------------------------------------------------------------
+# Self-serve recovery / adaptive strategy / tool discovery
+# ---------------------------------------------------------------------------
+self_serve_recovery:
+  enabled: true
+  max_recovery_attempts_per_url: 5
+  max_new_tools_per_day: 3
+  auto_install_tools: false
+  tool_install_mode: "recommend_only"   # recommend_only | sandbox_auto_install | approved_auto_install
+  require_allowlist_for_install: true
+  allow_github_install: false
+  allow_pypi_install: true
+  sandbox_test_required: true
+  promote_only_if_tests_pass: true
+  rollback_on_failure: true
+  alternative_source_search_enabled: true
+  tool_allowlist: ["trafilatura", "readability-lxml", "extruct", "newspaper3k", "goose3"]
+
+adaptive_strategy_router:
+  enabled: true
+  use_domain_memory: true
+  use_strategy_registry: true
+  min_success_rate_for_priority: 0.60
+  max_failure_rate_before_alternative_source: 0.70
+
+tool_discovery:
+  enabled: true
+  search_github: true
+  search_pypi: true
+  min_candidate_score: 0.75
+  require_recent_commit_months: 12
+  require_license: true
+  disallow_unknown_license: true
+  disallow_unmaintained_tools: true
+
+# ---------------------------------------------------------------------------
+# Decay / self-learning parameters
+# ---------------------------------------------------------------------------
+learning:
+  failure_penalty: 0.35
+  fatigue_threshold: 8.0
+  recovery_boost_step: 0.1
+  source_quality_alpha: 0.3        # EWMA smoothing for rolling quality
+  min_domain_quality: 0.1
+
+# ---------------------------------------------------------------------------
+# Geography (global by default)
+# ---------------------------------------------------------------------------
+geography:
+  mode: "global"                   # global | country | region
+  country: null
+  region: null
+  source_languages: ["en"]         # empty = all languages
+  default_market_scope: "global"
+
+# ---------------------------------------------------------------------------
+# Persistence / outputs
+# ---------------------------------------------------------------------------
+database_path: "data/collectibles.db"
+output_dir: "outputs"
+
+# ---------------------------------------------------------------------------
+# Dashboard
+# ---------------------------------------------------------------------------
+dashboard:
+  framework: "streamlit"
+  auto_refresh: true
+  refresh_seconds: 30
+  show_url_sourcing_agent: true
+  show_url_funnel: true
+  show_source_mix: true
+  show_event_seasonality: true
+  show_worker_status: true
+  colors:
+    red: "#E53238"
+    blue: "#0064D2"
+    yellow: "#F5AF02"
+    green: "#86B817"
+    dark_text: "#111827"
+    light_bg: "#F9FAFB"
+
+# ---------------------------------------------------------------------------
+# Optional Cloud Code / Kryo governance adapter (disabled by default)
+# ---------------------------------------------------------------------------
+cloud_code:
+  use_cloud_code_api: false
+  api_key_env: "CLOUD_CODE_API_KEY"
+  base_url_env: "CLOUD_CODE_BASE_URL"
+  send_internal_data: false        # governance: never send internal data unless true

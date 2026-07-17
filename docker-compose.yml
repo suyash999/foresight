@@ -1,0 +1,33 @@
+# Runs the continuous backend worker and the live dashboard together.
+#   docker compose up
+# The worker crawls continuously and writes to the shared ./data + ./outputs
+# volumes; the dashboard only reads from them and auto-refreshes.
+services:
+  worker:
+    build: .
+    container_name: ecia-worker
+    command: ["python", "-m", "emerging_collectibles_agent.main", "run-forever", "--config", "config.yaml"]
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./config.yaml:/app/config.yaml
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  dashboard:
+    build: .
+    container_name: ecia-dashboard
+    command: ["streamlit", "run", "src/emerging_collectibles_agent/dashboard/streamlit_app.py",
+              "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
+    environment:
+      - COLLECTIBLES_CONFIG=config.yaml
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+      - ./config.yaml:/app/config.yaml
+    ports:
+      - "8501:8501"
+    depends_on:
+      - worker
+    restart: unless-stopped

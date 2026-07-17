@@ -1,0 +1,131 @@
+"""Small shared utilities: time (UTC + IST), hashing, URL/domain helpers."""
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import datetime, timezone
+from urllib.parse import urljoin, urlparse, urldefrag
+
+import pytz
+
+try:
+    import tldextract
+
+    _TLD = tldextract.TLDExtract(cache_dir=None)
+except Exception:  # pragma: no cover
+    _TLD = None
+
+IST = pytz.timezone("Asia/Kolkata")
+
+
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def utc_iso(dt: datetime | None = None) -> str:
+    dt = dt or now_utc()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def to_ist_iso(dt: datetime | None = None, tz_name: str = "Asia/Kolkata") -> str:
+    dt = dt or now_utc()
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        tz = pytz.timezone(tz_name)
+    except Exception:
+        tz = IST
+    return dt.astimezone(tz).isoformat()
+
+
+def hours_since(dt: datetime | None) -> float:
+    if dt is None:
+        return 1e6
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return max(0.0, (now_utc() - dt).total_seconds() / 3600.0)
+
+
+def sha1(text: str) -> str:
+    return hashlib.sha1((text or "").encode("utf-8", "ignore")).hexdigest()
+
+
+def registered_domain(url: str) -> str:
+    """Return the registrable domain (example.co.uk) lower-cased."""
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return ""
+    if not host:
+        # maybe a bare domain was passed
+        host = url.lower().strip().strip("/")
+    host = host.split("@")[-1].split(":")[0]
+    if _TLD is not None:
+        ext = _TLD(host)
+        if ext.domain and ext.suffix:
+            return f"{ext.domain}.{ext.suffix}"
+        return host
+    parts = host.split(".")
+    return ".".join(parts[-2:]) if len(parts) >= 2 else host
+
+
+def full_host(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower().split(":")[0]
+    except Exception:
+        return ""
+
+
+def normalize_url(url: str, base: str | None = None) -> str:
+    """Resolve relative URLs, drop fragments, strip tracking params."""
+    if not url:
+        return ""
+    url = url.strip()
+    if base:
+        url = urljoin(base, url)
+    url, _ = urldefrag(url)
+    # strip common tracking params
+    if "?" in url:
+        base_part, _, query = url.partition("?")
+        keep = []
+        for kv in query.split("&"):
+            key = kv.split("=")[0].lower()
+            if key.startswith("utm_") or key in {"fbclid", "gclid", "ref", "mc_cid", "mc_eid"}:
+                continue
+            if kv:
+                keep.append(kv)
+        url = base_part + ("?" + "&".join(keep) if keep else "")
+    return url.rstrip("/") if url.endswith("/") and url.count("/") > 3 else url
+
+
+_WS = re.compile(r"\s+")
+_PUNCT = re.compile(r"[^\w\s]")
+
+
+def canonicalize_name(name: str) -> str:
+    """Normalise a product name for dedupe: lowercase, strip punctuation,
+    collapse whitespace, sort-independent token form kept readable."""
+    if not name:
+        return ""
+    text = name.lower().strip()
+    text = _PUNCT.sub(" ", text)
+    text = _WS.sub(" ", text).strip()
+    return text
+
+
+def canonical_key(name: str) -> str:
+    """A stronger dedupe key: sorted unique tokens (order-independent)."""
+    canon = canonicalize_name(name)
+    tokens = sorted(set(t for t in canon.split() if len(t) > 1))
+    return " ".join(tokens)
+
+
+def clean_text(text: str | None, limit: int | None = None) -> str:
+    if not text:
+        return ""
+    out = _WS.sub(" ", text).strip()
+    if limit and len(out) > limit:
+        out = out[:limit].rsplit(" ", 1)[0] + "…"
+    return out

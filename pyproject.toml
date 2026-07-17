@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emerging-collectibles-agent"
+version = "1.0.0"
+description = "External Emerging Collectibles Intelligence Agent — autonomous, agentic, high-recall product-trend discovery across collectibles verticals using external public sources (eBay excluded by default)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Emerging Collectibles Intelligence" }]
+keywords = ["collectibles", "trading-cards", "web-intelligence", "trend-detection", "agentic"]
+
+dependencies = [
+    "pyyaml>=6.0",
+    "pydantic>=2.5",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "python-dateutil>=2.8",
+    "pytz>=2023.3",
+    "httpx>=0.27",
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "lxml>=4.9",
+    "trafilatura>=1.8",
+    "readability-lxml>=0.8.1",
+    "feedparser>=6.0",
+    "tldextract>=5.1",
+    "rapidfuzz>=3.5",
+    "pyarrow>=14.0",
+    "streamlit>=1.30",
+    "plotly>=5.18",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.40", "camoufox[geoip]>=0.4"]
+llm = ["openai>=1.10"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+collectibles-agent = "emerging_collectibles_agent.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
