@@ -46,7 +46,46 @@ _COUNTRY_HINTS = {
 
 _BRANDS = ["topps", "panini", "bowman", "upper deck", "pokemon", "wizards of the coast",
            "bandai", "lego", "funko", "hasbro", "mattel", "rolex", "omega", "patek philippe",
-           "audemars piguet", "marvel", "dc", "fanatics", "leaf", "sage"]
+           "audemars piguet", "marvel", "dc", "fanatics", "leaf", "sage", "prizm", "select",
+           "mosaic", "optic", "chrome"]
+
+# Product-noun anchors and words that signal the *end* of a product phrase.
+_LEADING_STOP = {"the", "a", "an", "these", "this", "that", "other", "for", "with",
+                 "in", "on", "of", "and", "while", "meaning", "context", "each",
+                 "both", "new", "some", "all"}
+_TRAILING_BREAK = {"while", "which", "that", "meaning", "means", "because", "with",
+                   "include", "including", "combine", "combines", "average", "averaged",
+                   "and", "arrive", "arrives", "featuring", "since", "after", "before",
+                   "when", "where", "per", "are", "is", "was", "were", "have", "has"}
+
+
+def derive_product_name(line: str, brand: str = "") -> str:
+    """Turn a scanned sentence into a concise product-like name (keeps recall,
+    cuts the sentence noise). Prefers a phrase anchored on a year or brand."""
+    words = re.sub(r"[|•]", " ", line).split()
+    # strip leading filler words
+    while words and words[0].lower().strip(",.:;-") in _LEADING_STOP:
+        words = words[1:]
+    if not words:
+        return clean_text(line, 80)
+    # anchor on the first year token — but only if real content follows it
+    # (a trailing "…debut in 2026" should NOT collapse to just "2026").
+    start = 0
+    for i, w in enumerate(words):
+        if _YEAR.fullmatch(w.strip(",.:;")) and (len(words) - i) >= 4:
+            start = i
+            break
+    phrase = words[start:start + 9]
+    # cut at the first trailing connector after a few tokens
+    out = []
+    for i, w in enumerate(phrase):
+        if i >= 3 and w.lower().strip(",.:;") in _TRAILING_BREAK:
+            break
+        out.append(w)
+    name = " ".join(out).strip(" -–—:,.")
+    if len(name) < 4:  # fall back to a trimmed slice of the line
+        name = clean_text(line, 80)
+    return clean_text(name, 90)
 
 
 class ProductExtractionAgent:
@@ -228,7 +267,9 @@ class ProductExtractionAgent:
             has_brand = any(b in low for b in _BRANDS)
             v, vscore, _ = map_vertical(line, self.verticals)
             if v and (has_year or has_brand or vscore >= 0.5):
-                add(self._build_candidate(line, line, page, "text-scan", 0.4 + 0.1 * vscore))
+                # concise product name, full line kept as evidence context
+                name = derive_product_name(line, self._detect_brand(line))
+                add(self._build_candidate(name, line, page, "text-scan", 0.4 + 0.1 * vscore))
             if len(candidates) >= 60:  # per-page cap (still high recall)
                 break
 
