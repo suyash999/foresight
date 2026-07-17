@@ -455,7 +455,8 @@ class SourceDiscoveryAgent:
         if not conf.get("enabled"):
             return []
         key = self.config.env(conf.get("api_key_env", "GOOGLE_CUSTOM_SEARCH_API_KEY"))
-        cx = self.config.env(conf.get("cx_env", "GOOGLE_CUSTOM_SEARCH_CX"))
+        # cx can come from env OR be baked into config (cx is not secret)
+        cx = self.config.env(conf.get("cx_env", "GOOGLE_CUSTOM_SEARCH_CX")) or conf.get("cx")
         if not key or not cx:
             return []
         # protect the free quota (100/day): cap queries per cycle

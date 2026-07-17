@@ -426,6 +426,16 @@ with tabs[4]:
     if disc.empty and products.empty:
         st.info("No ingestion yet.")
 
+    # Embedded Google Programmable Search (CSE) over the trusted 50 sources
+    if CFG and CFG.get("dashboard.show_cse_widget", False):
+        cse_cx = CFG.get("dashboard.cse_cx", "")
+        if cse_cx:
+            st.markdown("##### 🔎 Web search (Foresight CSE — trusted collectible sources)")
+            components.html(
+                f'<script async src="https://cse.google.com/cse.js?cx={cse_cx}"></script>'
+                f'<div class="gcse-search"></div>',
+                height=520, scrolling=True)
+
 # ---- URL Sourcing -----------------------------------------------------------
 with tabs[5]:
     sec("Top of funnel", "URL Sourcing Intelligence")
