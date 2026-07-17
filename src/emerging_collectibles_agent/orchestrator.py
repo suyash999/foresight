@@ -72,6 +72,12 @@ class Orchestrator:
         self.max_pages = int(sc.get("max_pages_per_cycle", 120))
         self.max_pages_per_domain = int(sc.get("max_pages_per_domain", 20))
         self.max_depth = int(sc.get("max_crawl_depth", 3))
+        # Recovery is expensive (alternative-source lookups). Cap it per cycle and
+        # never run it for permanent per-page blocks (robots / 404), so a cycle
+        # never stalls on many blocked pages.
+        self.max_recovery_per_cycle = int(
+            config.get("self_serve_recovery.max_recovery_per_cycle", 6))
+        self._recovery_skip_types = {"blocked_by_robots", "http_404"}
         self.run_reference = config.run_reference
         self._cycle_stats: dict = {}
 
@@ -235,6 +241,7 @@ class Orchestrator:
         visited: set[str] = set()
         per_domain: dict[str, int] = {}
         pages_done = 0
+        recovery_used = 0
         # use a mutable list as a growable queue for recursion
         work = list(queue)
         idx = 0
@@ -298,13 +305,17 @@ class Orchestrator:
                 self.memory.record_output("ScrapingAgent", useless=True, success=False)
                 self.failure.record(run_id, "ScrapingAgent", url, domain, ftype,
                                     page.error_message)
-                rec = self.recovery.recover(run_id, url, ftype, item["source_type"],
-                                            page.extraction_method)
-                # if recovery produced content, re-extract
-                if rec.get("result") == "recovered_by_strategy":
-                    page2 = self.scraper.fetch(url, item["source_type"])
-                    if page2.status == "ok":
-                        candidates.extend(self.extractor.extract(page2))
+                # Only run the (expensive) recovery ladder for fixable failures,
+                # within a per-cycle budget. Skip permanent per-page blocks so the
+                # cycle never stalls on many robots-blocked/404 pages.
+                if ftype not in self._recovery_skip_types and recovery_used < self.max_recovery_per_cycle:
+                    recovery_used += 1
+                    rec = self.recovery.recover(run_id, url, ftype, item["source_type"],
+                                                page.extraction_method)
+                    if rec.get("result") == "recovered_by_strategy":
+                        page2 = self.scraper.fetch(url, item["source_type"])
+                        if page2.status == "ok":
+                            candidates.extend(self.extractor.extract(page2))
             if pages_done % 10 == 0:
                 self._heartbeat("CRAWL_PAGES", run_id)
         log.info("Crawled %d pages, extracted %d candidates, %d news, %d events",

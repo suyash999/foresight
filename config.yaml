@@ -517,6 +517,7 @@ validation_thresholds:
 # ---------------------------------------------------------------------------
 self_serve_recovery:
   enabled: true
+  max_recovery_per_cycle: 6              # cap expensive recovery work per cycle
   max_recovery_attempts_per_url: 5
   max_new_tools_per_day: 3
   auto_install_tools: false
@@ -604,7 +605,7 @@ hive_sink:
   auth: "KERBEROS"
   kerberos_service_name: "b_carmel"
   username_env: "KRYLOV_PRINCIPAL"     # Kerberos principal from env (no secrets in code)
-  database: "P_UK_PLAN_REPORT_T"
+  database: "P_UKPLAN_BACKUPS_T"
   table: "foresight1"
   write_mode: "append"                 # append = keep dated history in Hermes; replace = mirror latest
   batch_size: 50
