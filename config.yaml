@@ -394,6 +394,7 @@ scraping:
   global_max_concurrency: 6
   respect_robots_txt: true
   user_agent: "EmergingCollectiblesIntelligenceBot/1.0 (+research; respects robots.txt)"
+  min_product_name_quality: 0.5     # reject non-product strings (news/prose/spec lines)
   use_playwright: false
   use_camoufox: false
   use_jina_reader: false            # optional public URL→markdown reader (agent-reach style);

@@ -40,5 +40,7 @@ NEWS_ARTICLE_HTML = """
   <p>The Pokemon Company announced the release date for a new Pokemon TCG set.
      The booster boxes are expected to sell out. Collectors are already lining up
      preorders for the limited edition sealed products.</p>
+  <h2>Pokemon 151 Elite Trainer Box</h2>
+  <p>Chase card: Pokemon 151 Charizard ex Special Illustration Rare.</p>
 </body></html>
 """

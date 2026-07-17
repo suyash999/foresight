@@ -20,6 +20,7 @@ from ..llm.client import LLMClient
 from ..llm.prompts import (PRODUCT_EXTRACTION_SYSTEM, PRODUCT_EXTRACTION_USER)
 from ..logging_config import get_logger
 from ..models import FetchedPage, LLMProductList, ProductCandidate
+from ..product_name import clean_product_name, is_product_name, product_name_quality
 from ..taxonomy import (CATEGORY_HINTS, detect_signals, map_category, map_vertical,
                         snippet_around)
 from ..util import (canonicalize_name, canonical_key, clean_text, now_utc,
@@ -93,6 +94,7 @@ class ProductExtractionAgent:
         self.config = config
         self.verticals = config.verticals
         self.llm = llm
+        self.min_name_quality = float(config.get("scraping.min_product_name_quality", 0.5))
 
     # -- helpers ------------------------------------------------------------
     def _detect_country(self, text: str) -> tuple[str, float]:
@@ -164,9 +166,12 @@ class ProductExtractionAgent:
             pc.limited_edition_flag = True
 
     def _build_candidate(self, name: str, context: str, page: FetchedPage,
-                         method: str, confidence: float) -> Optional[ProductCandidate]:
-        name = clean_text(name, 200)
+                         method: str, confidence: float, require_product: bool = True) -> Optional[ProductCandidate]:
+        name = clean_product_name(clean_text(name, 200))
         if not name or len(name) < 4:
+            return None
+        # gate: only emit strings that look like a real product (news/prose/spec rejected)
+        if require_product and not is_product_name(name, self.min_name_quality):
             return None
         combo = f"{name} {context}"
         vertical, vscore, _ = map_vertical(combo, self.verticals)
@@ -246,10 +251,13 @@ class ProductExtractionAgent:
             name = entity.get("name") or entity.get("headline") or ""
             if not name:
                 continue
-            if any(t in ("Product", "IndividualProduct", "Article", "NewsArticle",
-                         "CreativeWork") for t in etypes):
+            is_structured_product = any(t in ("Product", "IndividualProduct") for t in etypes)
+            if is_structured_product or any(t in ("Article", "NewsArticle", "CreativeWork")
+                                            for t in etypes):
                 desc = entity.get("description", "")
-                add(self._build_candidate(name, f"{name} {desc}", page, "jsonld", 0.75))
+                # trust explicit Product schema; gate Article/NewsArticle through the detector
+                add(self._build_candidate(name, f"{name} {desc}", page, "jsonld", 0.75,
+                                          require_product=not is_structured_product))
 
         # 2. Title
         if page.title:
