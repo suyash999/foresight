@@ -16,6 +16,7 @@ import pandas as pd
 
 from .agents.product_normalization_agent import NormalizedProduct
 from .db import Database
+from .hive_sink import HiveSink
 from .logging_config import get_logger
 from .models import TrendReason
 from .util import sha1, to_ist_iso, utc_iso
@@ -276,6 +277,8 @@ class Exporter:
         self.db = db
         self.output_dir = config.output_dir
         os.makedirs(self.output_dir, exist_ok=True)
+        self.hive = HiveSink(config)
+        self.clear_csv_after_write = bool(config.get("hive_sink.clear_csv_after_write", True))
 
     def products_dataframe(self, rows: list[dict]) -> pd.DataFrame:
         df = pd.DataFrame(rows, columns=PRODUCT_COLUMNS) if rows else pd.DataFrame(columns=PRODUCT_COLUMNS)
@@ -307,8 +310,19 @@ class Exporter:
         master_df = pd.DataFrame(master_rows, columns=MASTER_COLUMNS) if master_rows \
             else pd.DataFrame(columns=MASTER_COLUMNS)
         master_df = master_df.sort_values("EPS", ascending=False) if not master_df.empty else master_df
-        master_df.to_csv(os.path.join(self.output_dir, "master_intelligence_latest.csv"), index=False)
+        master_path = os.path.join(self.output_dir, "master_intelligence_latest.csv")
+        master_df.to_csv(master_path, index=False)
         log.info("Exported %d products to CSV/Parquet/JSON + master CSV", len(rows))
+
+        # Optional Hive sink (Krylov). On CONFIRMED success, flush the master CSV
+        # back to a header-only file so it never grows on disk.
+        try:
+            hive_ok = self.hive.write_master(master_df)
+            if hive_ok and self.clear_csv_after_write:
+                pd.DataFrame(columns=MASTER_COLUMNS).to_csv(master_path, index=False)
+                log.info("Master CSV flushed to Hive and cleared to header-only.")
+        except Exception as exc:  # never let the sink break the pipeline
+            log.warning("Hive sink step failed (%s); master CSV retained.", exc)
         return df
 
     def save_aux(self) -> None:

@@ -31,6 +31,10 @@ plotly>=5.18
 # Optional LLM
 # openai>=1.10
 
+# Optional Hive sink (eBay / Krylov only) — install on Krylov via:
+#   pip install --user --proxy http://httpproxy-tcop.vip.ebay.com:80 'pyhive[hive]' thrift thrift_sasl sasl
+# pyhive[hive]>=0.7
+
 # Env
 python-dotenv>=1.0
 

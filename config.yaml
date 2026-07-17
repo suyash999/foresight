@@ -582,6 +582,23 @@ dashboard:
     light_bg: "#F9FAFB"
 
 # ---------------------------------------------------------------------------
+# Optional Hive sink (eBay / Krylov) — mirror the master CSV into Hive.
+# Disabled by default; only runs where PyHive + Kerberos are available.
+# ---------------------------------------------------------------------------
+hive_sink:
+  enabled: false                       # set true on Krylov
+  host: "hermes.prod.vip.ebay.com"
+  port: 10000
+  auth: "KERBEROS"
+  kerberos_service_name: "b_carmel"
+  username_env: "KRYLOV_PRINCIPAL"     # Kerberos principal from env (no secrets in code)
+  database: "P_UK_PLAN_REPORT_T"
+  table: "foresight1"
+  write_mode: "replace"                # replace = mirror latest master CSV; append = keep history
+  batch_size: 50
+  clear_csv_after_write: true          # empty master CSV once rows are safely in Hive
+
+# ---------------------------------------------------------------------------
 # Optional Cloud Code / Kryo governance adapter (disabled by default)
 # ---------------------------------------------------------------------------
 cloud_code:
