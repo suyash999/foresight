@@ -78,12 +78,25 @@ class ProductNormalizationAgent:
     def __init__(self, config: Config, memory=None):
         self.config = config
         self.memory = memory
-        self.fuzzy_threshold = 88
+        self.fuzzy_threshold = 84          # lower = merges more aggressively
+        self.jaccard_threshold = 0.55      # salient-token overlap fallback
+
+    @staticmethod
+    def _key_tokens(key: str) -> set:
+        return set(key.split())
+
+    def _jaccard(self, a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        inter = len(a & b)
+        union = len(a | b)
+        return inter / union if union else 0.0
 
     def normalize(self, candidates: list[ProductCandidate],
                   source_type_by_domain: Optional[dict[str, str]] = None) -> list[NormalizedProduct]:
         source_type_by_domain = source_type_by_domain or {}
         groups: dict[str, NormalizedProduct] = {}
+        group_tokens: dict[str, set] = {}
 
         for pc in candidates:
             key = canonical_key(pc.product_name)
@@ -92,13 +105,19 @@ class ProductNormalizationAgent:
             if key in groups:
                 groups[key].add(pc)
                 continue
-            # fuzzy merge into an existing group?
+            tokens = self._key_tokens(key)
             merged = False
-            if _HAVE_FUZZ and pc.vertical:
-                cname = canonicalize_name(pc.product_name)
-                for gkey, grp in groups.items():
-                    if grp.rep.vertical and grp.rep.vertical != pc.vertical:
-                        continue
+            cname = canonicalize_name(pc.product_name)
+            for gkey, grp in groups.items():
+                if grp.rep.vertical and pc.vertical and grp.rep.vertical != pc.vertical:
+                    continue
+                # 1) salient-token overlap (order-independent, wording-robust)
+                if self._jaccard(tokens, group_tokens[gkey]) >= self.jaccard_threshold:
+                    grp.add(pc)
+                    merged = True
+                    break
+                # 2) fuzzy string similarity fallback
+                if _HAVE_FUZZ:
                     ratio = fuzz.token_set_ratio(cname, grp.canonical_product_name)
                     if ratio >= self.fuzzy_threshold:
                         grp.add(pc)
@@ -106,6 +125,7 @@ class ProductNormalizationAgent:
                         break
             if not merged:
                 groups[key] = NormalizedProduct(pc)
+                group_tokens[key] = tokens
 
         result = list(groups.values())
         for grp in result:

@@ -1,23 +1,24 @@
-"""Live Streamlit dashboard for the Emerging Collectibles Intelligence Agent.
+"""Live Streamlit dashboard — External Emerging Collectibles Intelligence Agent.
 
-Reads from SQLite / Parquet outputs produced by the background worker. The
-worker runs independently; this dashboard only READS and auto-refreshes, so the
-agent keeps crawling even when the dashboard is closed. eBay-inspired theme.
-
-Run: streamlit run src/emerging_collectibles_agent/dashboard/streamlit_app.py
+Executive, McKinsey-style layout. Reads from SQLite / Parquet produced by the
+background worker (which runs independently and auto-refreshes here). eBay accent
+palette. Sections: Executive, Trending Products (with date), News → Trending,
+Markets & Geography, Live Feeds & Sources, URL Sourcing, Crawl, Sources, Events,
+Timeline, Agent Health, Self-Serve Learning.
 """
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-# make the package importable when run via `streamlit run`
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRC = os.path.abspath(os.path.join(_HERE, "..", ".."))
 if _SRC not in sys.path:
@@ -30,8 +31,9 @@ except Exception:
     _HAVE_PLOTLY = False
 
 from emerging_collectibles_agent.config import load_config
-from emerging_collectibles_agent.dashboard.theme import (COLORS, inject_css,
-                                                         status_badge)
+from emerging_collectibles_agent.dashboard.theme import (COLORS, SEQ, accent_bar,
+                                                         inject_css, insight,
+                                                         section, status_badge)
 
 st.set_page_config(page_title="Emerging Collectibles Intelligence",
                    page_icon="🃏", layout="wide")
@@ -75,29 +77,39 @@ def load_table(table: str, order: str = "", limit: int = 0) -> pd.DataFrame:
 
 @st.cache_data(ttl=10)
 def load_products() -> pd.DataFrame:
-    pq = os.path.join(OUT_DIR, "products_latest.parquet")
-    csv = os.path.join(OUT_DIR, "products_latest.csv")
-    try:
-        if os.path.exists(pq):
-            return pd.read_parquet(pq)
-        if os.path.exists(csv):
-            return pd.read_csv(csv)
-    except Exception:
-        pass
-    # fall back to sqlite snapshot
+    for path, reader in [(os.path.join(OUT_DIR, "products_latest.parquet"), pd.read_parquet),
+                         (os.path.join(OUT_DIR, "products_latest.csv"), pd.read_csv)]:
+        try:
+            if os.path.exists(path):
+                return reader(path)
+        except Exception:
+            continue
     import json
     df = load_table("product_dataframe", order="updated_at DESC")
     if not df.empty and "payload_json" in df:
-        rows = [json.loads(x) for x in df["payload_json"]]
-        return pd.DataFrame(rows)
+        return pd.DataFrame([json.loads(x) for x in df["payload_json"]])
     return pd.DataFrame()
 
 
-def _fmt_ts(ts: str) -> str:
+def _fmt_ts(ts) -> str:
     try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M UTC")
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M UTC")
     except Exception:
-        return ts or "n/a"
+        return str(ts) if ts else "n/a"
+
+
+def _explode(series: pd.Series, sep=r"\s*\|\s*") -> list[str]:
+    out = []
+    for v in series.dropna():
+        for part in re.split(sep, str(v)):
+            p = part.strip()
+            if p:
+                out.append(p)
+    return out
+
+
+def sec(kicker, title):
+    st.markdown(section(kicker, title), unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------------------------
@@ -111,42 +123,39 @@ if AUTO_REFRESH:
 
 st.markdown(
     f"""<div class="ecia-header">
-    <h1>External Emerging Collectibles Intelligence Agent</h1>
-    <p>Autonomous, high-recall product-trend discovery across collectibles verticals ·
-    external public sources only (eBay excluded) · run reference
-    {CFG.run_reference if CFG else 9839} · auto-refresh {REFRESH_SECS}s</p>
+    <h1>External Emerging Collectibles Intelligence</h1>
+    <p>Autonomous, high-recall product-trend discovery · external public sources only (eBay excluded) ·
+    run reference {CFG.run_reference if CFG else 9839} · live auto-refresh {REFRESH_SECS}s</p>
     </div>""",
     unsafe_allow_html=True)
+st.markdown(accent_bar(), unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# Worker status banner
-# ---------------------------------------------------------------------------
 hb = load_table("worker_heartbeat", order="id DESC", limit=1)
 runs = load_table("runs", order="started_at DESC", limit=1)
-col_a, col_b, col_c, col_d = st.columns(4)
+ca, cb, cc, cd = st.columns(4)
 if not hb.empty:
     last_ts = hb.iloc[0]["timestamp"]
     try:
-        age = (datetime.now(timezone.utc) - datetime.fromisoformat(last_ts.replace("Z", "+00:00"))).total_seconds()
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(last_ts).replace("Z", "+00:00"))).total_seconds()
     except Exception:
         age = 1e9
-    status = hb.iloc[0]["worker_status"]
     live = age <= STALE_SECS
     css = "worker-live" if live else "worker-stale"
-    label = ("🟢 LIVE" if live else "🔴 STALE") + f" · {status}"
-    col_a.markdown(f"**Backend worker:** <span class='{css}'>{label}</span>", unsafe_allow_html=True)
-    col_b.markdown(f"**Loop state:** {hb.iloc[0]['current_loop_state']}")
-    col_c.markdown(f"**Last heartbeat:** {_fmt_ts(last_ts)}")
-    col_d.markdown(f"**Next run:** {_fmt_ts(hb.iloc[0]['next_run_at']) if hb.iloc[0]['next_run_at'] else 'in cycle'}")
+    ca.markdown(f"**Worker:** <span class='{css}'>{'🟢 LIVE' if live else '🔴 STALE'} · {hb.iloc[0]['worker_status']}</span>",
+                unsafe_allow_html=True)
+    cb.markdown(f"**Loop state:** {hb.iloc[0]['current_loop_state']}")
+    cc.markdown(f"**Last heartbeat:** {_fmt_ts(last_ts)}")
+    cd.markdown(f"**Next run:** {_fmt_ts(hb.iloc[0]['next_run_at']) if hb.iloc[0]['next_run_at'] else 'in cycle'}")
 else:
-    col_a.markdown("**Backend worker:** <span class='worker-stale'>🔴 no heartbeat yet</span>",
-                   unsafe_allow_html=True)
-    col_b.info("Start the worker: `python -m emerging_collectibles_agent.main run-forever`")
+    ca.markdown("**Worker:** <span class='worker-stale'>🔴 no heartbeat yet</span>", unsafe_allow_html=True)
+    cb.info("Start it: `python -m emerging_collectibles_agent.main run-forever`")
 
 # ---------------------------------------------------------------------------
-# Load core data + sidebar filters
+# Data + filters
 # ---------------------------------------------------------------------------
 products = load_products()
+news = load_table("news_signals", order="id DESC", limit=4000)
+disc = load_table("url_discovery_log", order="id DESC", limit=8000)
 
 st.sidebar.header("Filters")
 if not products.empty:
@@ -159,59 +168,50 @@ if not products.empty:
     f_category = msel("Category", "category")
     f_status = msel("Final trend status", "final_trend_status")
     f_validation = msel("Validation status", "validation_status")
-    f_confidence = msel("Confidence level", "confidence_level")
+    f_country = msel("Country / market", "detected_country")
     f_stype = st.sidebar.multiselect(
         "Source type",
-        sorted({t.strip() for v in products.get("source_types", pd.Series(dtype=str)).dropna()
-                for t in str(v).split("|") if t.strip()}))
+        sorted({t for v in products.get("source_types", pd.Series(dtype=str)).dropna()
+                for t in re.split(r"\s*\|\s*", str(v)) if t.strip()}))
     f_event = st.sidebar.selectbox("Event linkage",
-                                   ["All", "Event linked", "Not linked",
-                                    "Upcoming event", "Recent/past event"])
+                                   ["All", "Event linked", "Not linked", "Upcoming event", "Recent/past event"])
     min_eps = st.sidebar.slider("Minimum EPS", 0, 100, 0)
     min_vtm = st.sidebar.slider("Minimum VTM", 0, 100, 0)
 
     fp = products.copy()
-    if f_vertical:
-        fp = fp[fp["vertical"].isin(f_vertical)]
-    if f_category:
-        fp = fp[fp["category"].isin(f_category)]
-    if f_status:
-        fp = fp[fp["final_trend_status"].isin(f_status)]
-    if f_validation:
-        fp = fp[fp["validation_status"].isin(f_validation)]
-    if f_confidence:
-        fp = fp[fp["confidence_level"].isin(f_confidence)]
-    if f_stype:
+    for col, sel in [("vertical", f_vertical), ("category", f_category),
+                     ("final_trend_status", f_status), ("validation_status", f_validation),
+                     ("detected_country", f_country)]:
+        if sel and col in fp:
+            fp = fp[fp[col].isin(sel)]
+    if f_stype and "source_types" in fp:
         fp = fp[fp["source_types"].apply(lambda v: any(t in str(v) for t in f_stype))]
     if "EPS" in fp:
         fp = fp[fp["EPS"] >= min_eps]
     if "VTM" in fp:
         fp = fp[fp["VTM"] >= min_vtm]
     if f_event != "All" and "linked_event_status" in fp:
-        if f_event == "Event linked":
-            fp = fp[fp["linked_event_status"] != "not_found"]
-        elif f_event == "Not linked":
-            fp = fp[fp["linked_event_status"] == "not_found"]
-        elif f_event == "Upcoming event":
-            fp = fp[fp["linked_event_status"] == "upcoming"]
-        elif f_event == "Recent/past event":
-            fp = fp[fp["linked_event_status"].isin(["recently_happened", "historical", "live"])]
+        m = {"Event linked": fp["linked_event_status"] != "not_found",
+             "Not linked": fp["linked_event_status"] == "not_found",
+             "Upcoming event": fp["linked_event_status"] == "upcoming",
+             "Recent/past event": fp["linked_event_status"].isin(["recently_happened", "historical", "live"])}
+        fp = fp[m[f_event]]
 else:
     fp = products
-    st.sidebar.info("No products yet — the worker will populate this shortly.")
+    st.sidebar.info("No products yet — the worker will populate this.")
 
 # ---------------------------------------------------------------------------
 # Tabs
 # ---------------------------------------------------------------------------
 tabs = st.tabs([
-    "📊 Executive", "🔥 Products", "🔎 URL Sourcing", "🕸️ Crawl Monitor",
-    "🏷️ Sources", "📰 News", "📅 Events & Seasonality", "📈 Timeline",
-    "🩺 Agent Health", "🛠️ Self-Serve Learning",
+    "📊 Executive", "🔥 Trending Products", "📰 News → Trending", "🌍 Markets & Geography",
+    "📡 Live Feeds & Sources", "🔎 URL Sourcing", "🕸️ Crawl", "🏷️ Sources",
+    "📅 Events", "📈 Timeline", "🩺 Agent Health", "🛠️ Self-Serve Learning",
 ])
 
 # ---- Executive --------------------------------------------------------------
 with tabs[0]:
-    st.subheader("Executive Overview")
+    sec("Situation overview", "Executive Overview")
     r = runs.iloc[0] if not runs.empty else None
     m = st.columns(6)
     m[0].metric("Current run", (r["run_id"] if r is not None else "—"))
@@ -221,185 +221,269 @@ with tabs[0]:
     m[4].metric("Products", int(r["products_extracted"]) if r is not None else 0)
     m[5].metric("Validated", int(r["products_validated"]) if r is not None else 0)
     if not products.empty:
-        m2 = st.columns(6)
         strong = int((products["final_trend_status"] == "Strong Emerging").sum())
         watch = int((products["final_trend_status"] == "Watchlist").sum())
+        top_vert = products["vertical"].mode().iat[0] if not products["vertical"].mode().empty else "n/a"
+        m2 = st.columns(6)
         m2[0].metric("Strong emerging", strong)
         m2[1].metric("Watchlist", watch)
         m2[2].metric("Avg EPS", round(products["EPS"].mean(), 1))
         m2[3].metric("Avg VTM", round(products["VTM"].mean(), 1))
         m2[4].metric("Verticals covered", products["vertical"].nunique())
         m2[5].metric("Events tracked", len(load_table("event_calendar")))
+        st.markdown(insight(
+            f"<b>So what:</b> {len(products)} products under watch across "
+            f"{products['vertical'].nunique()} verticals; the strongest concentration is in "
+            f"<b>{top_vert}</b>. {strong} products qualify as <b>Strong Emerging</b>, "
+            f"{watch} sit on the watchlist. Average EPS {round(products['EPS'].mean(),1)} / "
+            f"VTM {round(products['VTM'].mean(),1)} — the pipeline is prioritising recall, so "
+            f"filter by EPS/VTM/validation to focus."), unsafe_allow_html=True)
         if _HAVE_PLOTLY:
-            cc = st.columns(2)
+            g = st.columns(2)
             vc = products["vertical"].value_counts().reset_index()
             vc.columns = ["vertical", "count"]
-            fig = px.bar(vc, x="vertical", y="count", title="Products by vertical",
-                         color_discrete_sequence=[COLORS["blue"]])
-            cc[0].plotly_chart(fig, use_container_width=True)
+            g[0].plotly_chart(px.bar(vc, x="count", y="vertical", orientation="h",
+                                     title="Products by vertical", color_discrete_sequence=[COLORS["blue"]]),
+                              use_container_width=True)
             sc = products["final_trend_status"].value_counts().reset_index()
             sc.columns = ["status", "count"]
-            fig2 = px.pie(sc, names="status", values="count", title="Trend status mix",
-                          color_discrete_sequence=[COLORS["green"], COLORS["blue"],
-                                                   COLORS["yellow"], COLORS["red"], "#9CA3AF"])
-            cc[1].plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("Waiting for the first cycle to complete…")
+            g[1].plotly_chart(px.pie(sc, names="status", values="count", hole=0.55,
+                                     title="Trend status mix", color_discrete_sequence=SEQ),
+                              use_container_width=True)
 
-# ---- Products ---------------------------------------------------------------
+# ---- Trending Products ------------------------------------------------------
 with tabs[1]:
-    st.subheader(f"Emerging Products  ·  {len(fp)} shown (high-recall, filter in sidebar)")
+    sec("Emerging demand", "Trending Products")
     if not fp.empty:
-        cols = ["product_name", "vertical", "category", "subcategory", "brand",
-                "EPS", "VTM", "final_trend_status", "confidence_level",
-                "validation_status", "linked_event_name", "linked_event_status",
-                "primary_source_url", "first_seen_at", "last_seen_at"]
+        if "EPS" in fp:
+            top_row = fp.sort_values("EPS", ascending=False).iloc[0]
+            st.markdown(insight(
+                f"<b>Top signal:</b> <b>{top_row.get('product_name','')}</b> "
+                f"({top_row.get('vertical','')}) — EPS {top_row.get('EPS')}, VTM {top_row.get('VTM')}, "
+                f"status <b>{top_row.get('final_trend_status','')}</b>, trending "
+                f"{top_row.get('trending_date','')}."), unsafe_allow_html=True)
+        cols = ["trending_date", "product_name", "vertical", "category", "brand",
+                "EPS", "VTM", "final_trend_status", "confidence_level", "validation_status",
+                "detected_country", "linked_event_name", "primary_source_url"]
         show = [c for c in cols if c in fp.columns]
-        st.dataframe(fp[show].sort_values("EPS", ascending=False), use_container_width=True,
-                     height=420)
-        st.markdown("#### Product detail")
-        names = fp["product_name"].tolist()
-        pick = st.selectbox("Select a product", names)
+        st.dataframe(fp[show].sort_values("EPS", ascending=False), use_container_width=True, height=430)
+        st.markdown("##### Product detail")
+        pick = st.selectbox("Select a product", fp["product_name"].tolist())
         row = fp[fp["product_name"] == pick].iloc[0]
         st.markdown(status_badge(row.get("final_trend_status", "")), unsafe_allow_html=True)
-        d = st.columns(3)
+        d = st.columns(4)
         d[0].metric("EPS", row.get("EPS"))
         d[1].metric("VTM", row.get("VTM"))
         d[2].metric("Validation", row.get("validation_status"))
+        d[3].metric("Trending date", row.get("trending_date", "n/a"))
         st.markdown(f"**AI trend reason:** {row.get('ai_trend_reason','')}")
-        st.markdown(f"**Evidence summary:** {row.get('evidence_summary','')}")
         st.markdown(f"**Catalyst:** {row.get('catalyst_summary','')}")
         st.markdown(f"**Counter-signals:** {row.get('counter_signals','')}")
         st.markdown(f"**Recommended next validation:** {row.get('recommended_next_validation','')}")
-        st.markdown(f"**Score explanation:** {row.get('score_explanation','')}")
-        with st.expander("EPS breakdown"):
-            eps_cols = ["freshness_score", "source_credibility_score", "mention_velocity_score",
-                        "source_diversity_score", "news_catalyst_score", "event_proximity_score",
-                        "marketplace_signal_score", "scarcity_signal_score", "release_signal_score",
-                        "ai_confidence_score"]
-            st.json({c: row.get(c) for c in eps_cols if c in row})
-        with st.expander("VTM breakdown"):
-            vtm_cols = ["credible_source_coverage", "independent_confirmation", "mention_acceleration",
-                        "evidence_quality", "event_validation_score", "cross_category_catalyst",
-                        "recency_consistency", "noise_penalty_adjusted"]
-            st.json({c: row.get(c) for c in vtm_cols if c in row})
-        with st.expander("Sources & evidence snippets"):
-            st.write("**Source URLs:**", row.get("source_urls", ""))
-            st.write("**Evidence snippets:**", row.get("evidence_snippets", ""))
+        with st.expander("EPS / VTM breakdown & sources"):
+            eps_cols = ["freshness_score", "mention_velocity_score", "source_diversity_score",
+                        "news_catalyst_score", "event_proximity_score", "marketplace_signal_score",
+                        "scarcity_signal_score"]
+            vtm_cols = ["credible_source_coverage", "independent_confirmation", "evidence_quality",
+                        "event_validation_score", "noise_penalty_adjusted"]
+            st.write("**EPS components:**", {c: row.get(c) for c in eps_cols if c in row})
+            st.write("**VTM components:**", {c: row.get(c) for c in vtm_cols if c in row})
+            st.write("**Sources:**", row.get("source_urls", ""))
+            st.write("**Evidence:**", row.get("evidence_snippets", ""))
     else:
         st.info("No products match the current filters.")
 
-# ---- URL Sourcing Intelligence ---------------------------------------------
+# ---- News → Trending --------------------------------------------------------
 with tabs[2]:
-    st.subheader("URL Sourcing Intelligence")
-    disc = load_table("url_discovery_log", order="id DESC", limit=5000)
+    sec("Signal from the news", "News → Trending Products")
+    if not news.empty:
+        # aggregate product names mentioned across news → ranked trending-in-news
+        cand = []
+        for v in news.get("mapped_product_name", pd.Series(dtype=str)).dropna():
+            for part in re.split(r"\s*[|,]\s*", str(v)):
+                p = part.strip()
+                if p:
+                    cand.append(p)
+        ranked = Counter(cand).most_common(15)
+        if ranked:
+            top_name, top_n = ranked[0]
+            st.markdown(insight(
+                f"<b>Trending in the news:</b> <b>{top_name}</b> leads with {top_n} news mention(s). "
+                f"{len(news)} news items scanned; {news['source_domain'].nunique()} distinct outlets."),
+                unsafe_allow_html=True)
+            rk = pd.DataFrame(ranked, columns=["Product / candidate", "News mentions"])
+            gcol = st.columns([2, 3])
+            gcol[0].dataframe(rk, use_container_width=True, height=380)
+            if _HAVE_PLOTLY:
+                gcol[1].plotly_chart(
+                    px.bar(rk.head(10).iloc[::-1], x="News mentions", y="Product / candidate",
+                           orientation="h", title="Top product names trending per news",
+                           color_discrete_sequence=[COLORS["red"]]), use_container_width=True)
+        st.markdown("##### News catalysts feed")
+        ncols = ["observed_at", "news_title", "entity_detected", "mapped_product_name",
+                 "news_signal_score", "source_domain", "news_url"]
+        nshow = news[[c for c in ncols if c in news.columns]].copy()
+        if "observed_at" in nshow:
+            nshow["date"] = nshow["observed_at"].astype(str).str[:10]
+        st.dataframe(nshow, use_container_width=True, height=340)
+    else:
+        st.info("No news signals yet — news→product mapping appears once news pages are crawled.")
+
+# ---- Markets & Geography ----------------------------------------------------
+with tabs[3]:
+    sec("Where demand is forming", "Markets & Geography")
+    if not products.empty and "detected_country" in products.columns:
+        geo = products[products["detected_country"].astype(str).str.strip() != ""]
+        if not geo.empty:
+            agg = geo.groupby("detected_country").agg(
+                products=("product_name", "count"),
+                avg_eps=("EPS", "mean"), avg_vtm=("VTM", "mean")).reset_index()
+            agg["avg_eps"] = agg["avg_eps"].round(1)
+            agg["avg_vtm"] = agg["avg_vtm"].round(1)
+            lead = agg.sort_values("products", ascending=False).iloc[0]
+            st.markdown(insight(
+                f"<b>Market read:</b> strongest localized signal in <b>{lead['detected_country']}</b> "
+                f"({int(lead['products'])} products, avg EPS {lead['avg_eps']}). "
+                f"{int((products['global_signal_flag']==True).sum()) if 'global_signal_flag' in products else 0} "
+                f"products carry a global market scope."), unsafe_allow_html=True)
+            if _HAVE_PLOTLY:
+                gc = st.columns([3, 2])
+                fig = px.choropleth(agg, locations="detected_country", locationmode="country names",
+                                    color="products", hover_data=["avg_eps", "avg_vtm"],
+                                    color_continuous_scale=["#DBEAFE", COLORS["blue"], COLORS["navy"]],
+                                    title="Signal density by country")
+                fig.update_geos(showframe=False, showcoastlines=True, projection_type="natural earth")
+                gc[0].plotly_chart(fig, use_container_width=True)
+                if "market_scope" in products:
+                    ms = products["market_scope"].value_counts().reset_index()
+                    ms.columns = ["market_scope", "count"]
+                    gc[1].plotly_chart(px.pie(ms, names="market_scope", values="count", hole=0.5,
+                                              title="Market scope", color_discrete_sequence=SEQ),
+                                       use_container_width=True)
+            st.markdown("##### Country breakdown")
+            st.dataframe(agg.sort_values("products", ascending=False), use_container_width=True, height=280)
+        else:
+            st.info("No country-localized signals detected yet (most signals are global-scope). "
+                    "Country is inferred only when a source gives explicit geographic evidence.")
+    else:
+        st.info("No product geography yet.")
+
+# ---- Live Feeds & Sources ---------------------------------------------------
+with tabs[4]:
+    sec("Provenance & live ingestion", "Live Feeds & Data Sources")
+    st.markdown(insight(
+        "<b>Every signal is traceable.</b> This view segments the live ingestion by <b>channel</b> "
+        "(RSS, GDELT, Wikipedia, Wikidata, sitemap, search API, recursive), by <b>source type</b> "
+        "(manufacturer, auction house, hobby publication, news…), and by <b>domain</b> — so you always "
+        "know where a product signal was pulled from."), unsafe_allow_html=True)
+    if not disc.empty:
+        c1, c2 = st.columns(2)
+        by_method = disc["discovery_method"].value_counts().reset_index()
+        by_method.columns = ["channel", "urls"]
+        by_type = disc[disc["source_type"].astype(str).str.strip() != ""]["source_type"].value_counts().reset_index()
+        by_type.columns = ["source_type", "urls"]
+        if _HAVE_PLOTLY:
+            c1.plotly_chart(px.bar(by_method, x="channel", y="urls", title="Live feed by channel",
+                                   color_discrete_sequence=[COLORS["green"]]), use_container_width=True)
+            if not by_type.empty:
+                c2.plotly_chart(px.bar(by_type.head(12), x="urls", y="source_type", orientation="h",
+                                       title="By source type", color_discrete_sequence=[COLORS["blue"]]),
+                                use_container_width=True)
+        st.markdown("##### Live discovery feed (most recent, segmented)")
+        channel = st.selectbox("Filter feed by channel",
+                               ["All"] + sorted(disc["discovery_method"].dropna().unique().tolist()))
+        feed = disc if channel == "All" else disc[disc["discovery_method"] == channel]
+        fcols = ["discovered_at", "discovery_method", "discovery_source", "seed_query",
+                 "discovered_url", "domain", "source_type", "mapped_vertical",
+                 "relevance_score", "selection_status"]
+        st.dataframe(feed[[c for c in fcols if c in feed.columns]].head(400),
+                     use_container_width=True, height=340)
+    # top domains providing products
+    if not products.empty and "source_domains" in products.columns:
+        st.markdown("##### Top domains feeding product signals")
+        doms = Counter(_explode(products["source_domains"]))
+        dd = pd.DataFrame(doms.most_common(20), columns=["domain", "product_signals"])
+        st.dataframe(dd, use_container_width=True, height=260)
+    if disc.empty and products.empty:
+        st.info("No ingestion yet.")
+
+# ---- URL Sourcing -----------------------------------------------------------
+with tabs[5]:
+    sec("Top of funnel", "URL Sourcing Intelligence")
     if not disc.empty:
         s = st.columns(5)
-        s[0].metric("Discovered (log)", len(disc))
+        s[0].metric("Discovered", len(disc))
         s[1].metric("Selected", int((disc["selection_status"] == "selected").sum()))
         s[2].metric("Rejected", int((disc["selection_status"] == "rejected").sum()))
         s[3].metric("Duplicates", int(disc["duplicate_flag"].sum()))
-        s[4].metric("Methods", disc["discovery_method"].nunique())
-        st.markdown("##### URL funnel")
+        s[4].metric("Channels", disc["discovery_method"].nunique())
         crawl = load_table("crawl_urls")
         pages = load_table("pages")
-        selected_n = int((disc["selection_status"] == "selected").sum())
-        crawled_n = len(crawl)
-        ok_n = int((crawl["crawl_status"] == "ok").sum()) if not crawl.empty else 0
-        prod_urls = int((pages.get("product_signal_score", pd.Series(dtype=float)) > 0).sum()) if not pages.empty else 0
         funnel = pd.DataFrame({
             "stage": ["Discovered", "Selected", "Crawled", "Extracted OK", "Product-signal"],
-            "count": [len(disc), selected_n, crawled_n, ok_n, prod_urls]})
+            "count": [len(disc), int((disc["selection_status"] == "selected").sum()), len(crawl),
+                      int((crawl["crawl_status"] == "ok").sum()) if not crawl.empty else 0,
+                      int((pages.get("product_signal_score", pd.Series(dtype=float)) > 0).sum()) if not pages.empty else 0]})
         if _HAVE_PLOTLY:
-            fig = px.funnel(funnel, x="count", y="stage",
-                            color_discrete_sequence=[COLORS["blue"]])
-            st.plotly_chart(fig, use_container_width=True)
-            st.markdown("##### Discovery source mix")
-            mix = disc["discovery_method"].value_counts().reset_index()
-            mix.columns = ["method", "count"]
-            st.plotly_chart(px.bar(mix, x="method", y="count",
-                                   color_discrete_sequence=[COLORS["green"]]),
-                            use_container_width=True)
-        st.markdown("##### Every discovered URL (observable)")
-        cols = ["discovered_at", "discovery_method", "seed_query", "discovered_url",
-                "domain", "source_type", "mapped_vertical", "relevance_score",
-                "credibility_score", "priority_score", "selection_status",
-                "selection_reason", "rejection_reason", "robots_status", "next_action"]
-        st.dataframe(disc[[c for c in cols if c in disc.columns]], use_container_width=True,
-                     height=420)
+            st.plotly_chart(px.funnel(funnel, x="count", y="stage",
+                                      color_discrete_sequence=[COLORS["blue"]]), use_container_width=True)
+        cols = ["discovered_at", "discovery_method", "seed_query", "discovered_url", "domain",
+                "source_type", "mapped_vertical", "relevance_score", "priority_score",
+                "selection_status", "selection_reason", "rejection_reason", "next_action"]
+        st.dataframe(disc[[c for c in cols if c in disc.columns]], use_container_width=True, height=380)
     else:
         st.info("No URL discovery yet.")
 
-# ---- Crawl Monitor ----------------------------------------------------------
-with tabs[3]:
-    st.subheader("URL Crawl Monitor")
+# ---- Crawl ------------------------------------------------------------------
+with tabs[6]:
+    sec("Acquisition", "URL Crawl Monitor")
     crawl = load_table("crawl_urls", order="id DESC", limit=3000)
     if not crawl.empty:
         cols = ["url", "domain", "source_type", "crawl_status", "page_relevance_score",
-                "source_credibility_score", "product_signal_score", "last_crawled_at",
-                "error_message"]
-        st.dataframe(crawl[[c for c in cols if c in crawl.columns]], use_container_width=True,
-                     height=500)
+                "source_credibility_score", "product_signal_score", "last_crawled_at", "error_message"]
+        st.dataframe(crawl[[c for c in cols if c in crawl.columns]], use_container_width=True, height=480)
     else:
         st.info("No crawl activity yet.")
 
 # ---- Sources ----------------------------------------------------------------
-with tabs[4]:
-    st.subheader("Source Credibility & Learning")
+with tabs[7]:
+    sec("Credibility", "Source Credibility & Learning")
     sd = load_table("source_domains", order="pages_seen DESC")
     sq = load_table("source_quality_memory", order="source_quality_score DESC")
     if not sd.empty:
-        st.markdown("##### Source credibility")
-        st.dataframe(sd, use_container_width=True, height=300)
+        st.dataframe(sd, use_container_width=True, height=280)
     if not sq.empty:
         st.markdown("##### Source quality memory (self-learning)")
-        cols = ["domain", "source_quality_score", "source_fatigue_score", "recovery_boost",
-                "success_count", "failure_count", "blocked_count", "false_positive_count",
-                "products_found", "validated_found", "avg_eps", "avg_vtm"]
-        st.dataframe(sq[[c for c in cols if c in sq.columns]], use_container_width=True, height=300)
+        st.dataframe(sq[[c for c in ["domain", "source_quality_score", "source_fatigue_score",
+                                     "recovery_boost", "success_count", "failure_count",
+                                     "products_found", "validated_found", "avg_eps", "avg_vtm"]
+                         if c in sq.columns]], use_container_width=True, height=280)
     if sd.empty and sq.empty:
         st.info("No source data yet.")
 
-# ---- News -------------------------------------------------------------------
-with tabs[5]:
-    st.subheader("News Catalyst Dashboard")
-    news = load_table("news_signals", order="id DESC", limit=2000)
-    if not news.empty:
-        cols = ["news_title", "source_domain", "entity_detected", "mapped_product_name",
-                "news_signal_score", "news_to_product_reason", "news_url", "observed_at"]
-        st.dataframe(news[[c for c in cols if c in news.columns]], use_container_width=True,
-                     height=460)
-    else:
-        st.info("No news signals yet.")
-
-# ---- Events & Seasonality ---------------------------------------------------
-with tabs[6]:
-    st.subheader("Event & Seasonality Intelligence")
+# ---- Events -----------------------------------------------------------------
+with tabs[8]:
+    sec("Catalysts & seasonality", "Events & Seasonality")
     ev = load_table("event_calendar", order="event_confidence_score DESC")
     if not ev.empty:
-        cols = ["event_name", "event_type", "event_date", "event_status",
-                "days_until_event", "days_since_event", "affected_verticals",
-                "seasonality_score", "event_confidence_score", "event_source_url",
-                "expected_product_impact_reason"]
-        st.dataframe(ev[[c for c in cols if c in ev.columns]], use_container_width=True,
-                     height=340)
+        cols = ["event_name", "event_type", "event_date", "event_status", "days_until_event",
+                "days_since_event", "affected_verticals", "seasonality_score",
+                "event_confidence_score", "expected_product_impact_reason"]
+        st.dataframe(ev[[c for c in cols if c in ev.columns]], use_container_width=True, height=320)
     if not fp.empty and "linked_event_name" in fp:
-        st.markdown("##### Event-linked products")
         linked = fp[fp["linked_event_status"] != "not_found"]
-        cols = ["product_name", "vertical", "EPS", "VTM", "linked_event_name",
-                "linked_event_type", "linked_event_date", "linked_event_status",
-                "days_until_event", "event_confidence_score", "event_to_product_reason"]
         if not linked.empty:
-            st.dataframe(linked[[c for c in cols if c in linked.columns]],
-                         use_container_width=True, height=300)
-        else:
-            st.caption("No products currently linked to a confirmed event (no hallucinated links).")
+            st.markdown("##### Event-linked products")
+            cols = ["trending_date", "product_name", "vertical", "EPS", "VTM", "linked_event_name",
+                    "linked_event_type", "linked_event_date", "linked_event_status",
+                    "days_until_event", "event_confidence_score"]
+            st.dataframe(linked[[c for c in cols if c in linked.columns]], use_container_width=True, height=300)
     if ev.empty:
         st.info("No events yet.")
 
 # ---- Timeline ---------------------------------------------------------------
-with tabs[7]:
-    st.subheader("Trend Timeline")
+with tabs[9]:
+    sec("Momentum over time", "Trend Timeline")
     hist = load_table("products")
     if not hist.empty and _HAVE_PLOTLY:
         runs_df = load_table("runs", order="started_at")
@@ -409,79 +493,60 @@ with tabs[7]:
             top = merged.groupby("product_name")["eps"].max().nlargest(8).index
             sub = merged[merged["product_name"].isin(top)]
             st.plotly_chart(px.line(sub, x="started_at", y="eps", color="product_name",
-                                    title="EPS over time (top products)"),
-                            use_container_width=True)
-            st.plotly_chart(px.line(sub, x="started_at", y="vtm", color="product_name",
-                                    title="VTM over time (top products)"),
+                                    title="EPS over time (top products)", color_discrete_sequence=SEQ),
                             use_container_width=True)
             cat = merged.groupby([merged["started_at"].dt.date, "vertical"]).size().reset_index(name="mentions")
             cat.columns = ["date", "vertical", "mentions"]
             st.plotly_chart(px.area(cat, x="date", y="mentions", color="vertical",
-                                    title="Mentions by vertical over time"),
+                                    title="Mentions by vertical over time", color_discrete_sequence=SEQ),
                             use_container_width=True)
     else:
         st.info("Timeline appears after multiple cycles.")
 
 # ---- Agent Health -----------------------------------------------------------
-with tabs[8]:
-    st.subheader("Agent Health, Failures & Recovery")
+with tabs[10]:
+    sec("Operations", "Agent Health, Failures & Recovery")
     residue = load_table("agent_residue", order="id DESC", limit=500)
     fails = load_table("agent_failures", order="failure_id DESC", limit=1000)
     if not residue.empty:
-        st.markdown("##### Agent residue (useless / total outputs)")
         agg = residue.groupby("agent_name").agg(
-            total=("total_outputs", "sum"), useless=("useless_outputs", "sum"),
-            success=("success_count", "sum"), failure=("failure_count", "sum")).reset_index()
+            total=("total_outputs", "sum"), useless=("useless_outputs", "sum")).reset_index()
         agg["residue_score"] = (agg["useless"] / agg["total"].clip(lower=1)).round(3)
         st.dataframe(agg, use_container_width=True)
     if not fails.empty:
-        st.markdown("##### Failures & recovery actions")
-        cols = ["agent_name", "url", "domain", "failure_type", "failure_reason",
-                "recovery_action", "decay_applied", "suppress_until", "final_status", "created_at"]
-        st.dataframe(fails[[c for c in cols if c in fails.columns]], use_container_width=True,
-                     height=360)
+        cols = ["agent_name", "url", "domain", "failure_type", "recovery_action",
+                "decay_applied", "suppress_until", "final_status", "created_at"]
+        st.dataframe(fails[[c for c in cols if c in fails.columns]], use_container_width=True, height=320)
         if _HAVE_PLOTLY:
             ft = fails["failure_type"].value_counts().reset_index()
             ft.columns = ["failure_type", "count"]
             st.plotly_chart(px.bar(ft, x="failure_type", y="count",
-                                   color_discrete_sequence=[COLORS["red"]]),
-                            use_container_width=True)
+                                   color_discrete_sequence=[COLORS["red"]]), use_container_width=True)
     if residue.empty and fails.empty:
         st.success("No failures recorded — clean run so far.")
 
 # ---- Self-Serve Learning ----------------------------------------------------
-with tabs[9]:
-    st.subheader("Self-Serve Learning, Strategy & Tool Discovery")
+with tabs[11]:
+    sec("Continuous improvement", "Self-Serve Learning, Strategy & Tools")
     strat = load_table("strategy_registry", order="success_rate DESC")
     recov = load_table("recovery_attempts", order="recovery_id DESC", limit=1000)
     tools = load_table("tool_candidates", order="tool_candidate_score DESC")
-    installed = load_table("installed_tools", order="installed_tool_id DESC")
-    dlm = load_table("domain_learning_memory")
     if not strat.empty:
-        st.markdown("##### Strategy registry (best strategy per domain, learned)")
-        cols = ["domain", "strategy_name", "success_count", "failure_count", "success_rate",
-                "avg_products_extracted", "avg_confidence", "avg_runtime_seconds", "active_flag"]
-        st.dataframe(strat[[c for c in cols if c in strat.columns]], use_container_width=True,
-                     height=260)
+        st.markdown("##### Strategy registry (learned best strategy per domain)")
+        st.dataframe(strat[[c for c in ["domain", "strategy_name", "success_count", "failure_count",
+                                        "success_rate", "avg_products_extracted", "active_flag"]
+                            if c in strat.columns]], use_container_width=True, height=240)
     if not recov.empty:
         st.markdown("##### Recovery attempts")
-        cols = ["url", "domain", "failure_type", "original_strategy", "attempted_strategy",
-                "attempted_tool", "result", "products_extracted", "notes", "timestamp"]
-        st.dataframe(recov[[c for c in cols if c in recov.columns]], use_container_width=True,
-                     height=260)
+        st.dataframe(recov[[c for c in ["url", "domain", "failure_type", "attempted_strategy",
+                                        "attempted_tool", "result", "notes", "timestamp"]
+                            if c in recov.columns]], use_container_width=True, height=220)
     if not tools.empty:
         st.markdown("##### Tool candidates (scored before use; recommend-only by default)")
-        cols = ["tool_name", "source_url", "tool_candidate_score", "maintenance_score",
-                "security_score", "license_score", "evaluation_status", "install_status",
-                "test_status", "promoted_flag", "recommendation_reason"]
-        st.dataframe(tools[[c for c in cols if c in tools.columns]], use_container_width=True,
-                     height=240)
-    if not installed.empty:
-        st.markdown("##### Installed tools (sandboxed)")
-        st.dataframe(installed, use_container_width=True, height=180)
-    if not dlm.empty:
-        st.markdown("##### Domain learning memory")
-        st.dataframe(dlm, use_container_width=True, height=200)
+        st.dataframe(tools[[c for c in ["tool_name", "tool_candidate_score", "security_score",
+                                        "license_score", "evaluation_status", "install_status",
+                                        "recommendation_reason"] if c in tools.columns]],
+                     use_container_width=True, height=220)
     if strat.empty and recov.empty and tools.empty:
         st.info("Self-serve learning data appears once recovery paths are exercised.")
 

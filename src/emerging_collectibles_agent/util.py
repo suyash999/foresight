@@ -115,11 +115,26 @@ def canonicalize_name(name: str) -> str:
     return text
 
 
+# Generic filler words dropped from the dedupe key so wording variants of the
+# SAME product collapse together (salient tokens — year/brand/set/player/parallel
+# — are kept).
+_KEY_STOPWORDS = {
+    "the", "a", "an", "and", "of", "for", "with", "new", "full", "review",
+    "checklist", "context", "these", "this", "that", "other", "per", "are",
+    "is", "was", "were", "have", "has", "series", "history", "here", "at",
+    "to", "in", "on", "by", "from", "card", "cards", "set", "sets", "edition",
+    "including", "include", "featuring", "official", "guide", "list", "info",
+}
+
+
 def canonical_key(name: str) -> str:
-    """A stronger dedupe key: sorted unique tokens (order-independent)."""
+    """A strong dedupe key: salient, order-independent tokens with generic
+    filler removed so wording variants of the same product collapse."""
     canon = canonicalize_name(name)
-    tokens = sorted(set(t for t in canon.split() if len(t) > 1))
-    return " ".join(tokens)
+    tokens = [t for t in canon.split() if len(t) > 1 and t not in _KEY_STOPWORDS]
+    if not tokens:  # fall back to raw tokens if everything was filler
+        tokens = [t for t in canon.split() if len(t) > 1]
+    return " ".join(sorted(set(tokens)))
 
 
 def clean_text(text: str | None, limit: int | None = None) -> str:

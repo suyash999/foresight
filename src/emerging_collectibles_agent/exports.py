@@ -43,7 +43,7 @@ PRODUCT_COLUMNS = [
     "final_trend_status", "validation_status", "confidence_level",
     "key_trend_signals", "evidence_summary", "evidence_snippets",
     "catalyst_summary", "ai_trend_reason", "counter_signals",
-    "recommended_next_validation", "first_seen_at", "last_seen_at",
+    "recommended_next_validation", "trending_date", "first_seen_at", "last_seen_at",
     "extraction_method", "extraction_confidence", "raw_context_hash",
     # geography
     "detected_country", "detected_region", "source_country", "market_scope",
@@ -141,6 +141,7 @@ def build_product_row(run_id: str, run_reference: int, product: NormalizedProduc
         "ai_trend_reason": reason.ai_trend_reason,
         "counter_signals": " | ".join(reason.counter_signals),
         "recommended_next_validation": reason.recommended_next_validation,
+        "trending_date": (product.last_seen or utc_iso())[:10],
         "first_seen_at": product.first_seen,
         "last_seen_at": product.last_seen,
         "extraction_method": rep.extraction_method,
