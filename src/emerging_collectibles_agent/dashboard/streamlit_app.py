@@ -164,7 +164,7 @@ if not products.empty:
             opts = sorted([x for x in products[col].dropna().unique() if str(x).strip()])
             return st.sidebar.multiselect(label, opts)
         return []
-    f_vertical = msel("Vertical", "vertical")
+    f_vertical = msel("Focus Category", "vertical")
     f_category = msel("Category", "category")
     f_status = msel("Final trend status", "final_trend_status")
     f_validation = msel("Validation status", "validation_status")
@@ -250,6 +250,18 @@ with tabs[0]:
             g[1].plotly_chart(px.pie(sc, names="status", values="count", hole=0.55,
                                      title="Trend status mix", color_discrete_sequence=SEQ),
                               use_container_width=True)
+        # consolidated master CSV download (everything, one file)
+        st.markdown("##### Consolidated master export (one CSV, everything)")
+        mpath = os.path.join(OUT_DIR, "master_intelligence_latest.csv")
+        if os.path.exists(mpath):
+            with open(mpath, "rb") as fh:
+                st.download_button("⬇ Download master_intelligence_latest.csv", fh.read(),
+                                   "master_intelligence_latest.csv", "text/csv",
+                                   help="SKU→focus-category precision, row by row: what is trending, "
+                                        "why, the linked event, the market, and the sources.")
+        st.caption("Also written to disk: products_latest.{csv,parquet,json}, "
+                   "master_intelligence_latest.csv, event_calendar_latest.csv, "
+                   "url_discovery_latest.csv, news_signal_latest.csv, source_scores_latest.csv")
 
 # ---- Trending Products ------------------------------------------------------
 with tabs[1]:
@@ -262,11 +274,14 @@ with tabs[1]:
                 f"({top_row.get('vertical','')}) — EPS {top_row.get('EPS')}, VTM {top_row.get('VTM')}, "
                 f"status <b>{top_row.get('final_trend_status','')}</b>, trending "
                 f"{top_row.get('trending_date','')}."), unsafe_allow_html=True)
-        cols = ["trending_date", "product_name", "vertical", "category", "brand",
-                "EPS", "VTM", "final_trend_status", "confidence_level", "validation_status",
-                "detected_country", "linked_event_name", "primary_source_url"]
+        cols = ["trending_date", "product_name", "focus_category", "category", "brand",
+                "EPS", "VTM", "trend_confidence_pct", "final_trend_status", "confidence_level",
+                "validation_status", "matched_items", "detected_country", "linked_event_name",
+                "primary_source_url"]
         show = [c for c in cols if c in fp.columns]
         st.dataframe(fp[show].sort_values("EPS", ascending=False), use_container_width=True, height=430)
+        st.download_button("⬇ Download this view (CSV)", fp.to_csv(index=False),
+                           "trending_products_view.csv", "text/csv")
         st.markdown("##### Product detail")
         pick = st.selectbox("Select a product", fp["product_name"].tolist())
         row = fp[fp["product_name"] == pick].iloc[0]
@@ -398,6 +413,10 @@ with tabs[4]:
                  "relevance_score", "selection_status"]
         st.dataframe(feed[[c for c in fcols if c in feed.columns]].head(400),
                      use_container_width=True, height=340)
+        st.download_button("⬇ Download exhaustive URL list (CSV)", disc.to_csv(index=False),
+                           "url_discovery_full.csv", "text/csv",
+                           help="Every discovered URL with channel, source, mapped focus category, "
+                                "scores, and why it was selected or rejected.")
     # top domains providing products
     if not products.empty and "source_domains" in products.columns:
         st.markdown("##### Top domains feeding product signals")
@@ -466,10 +485,31 @@ with tabs[8]:
     sec("Catalysts & seasonality", "Events & Seasonality")
     ev = load_table("event_calendar", order="event_confidence_score DESC")
     if not ev.empty:
-        cols = ["event_name", "event_type", "event_date", "event_status", "days_until_event",
-                "days_since_event", "affected_verticals", "seasonality_score",
-                "event_confidence_score", "expected_product_impact_reason"]
-        st.dataframe(ev[[c for c in cols if c in ev.columns]], use_container_width=True, height=320)
+        upcoming = ev[ev["event_status"] == "upcoming"].copy()
+        if not upcoming.empty and "days_until_event" in upcoming:
+            nxt = upcoming.sort_values("days_until_event").iloc[0]
+            st.markdown(insight(
+                f"<b>Next catalyst:</b> <b>{nxt['event_name']}</b> in "
+                f"~{int(nxt['days_until_event']) if pd.notna(nxt['days_until_event']) else '?'} days "
+                f"({nxt.get('event_date','')}) — likely to lift: "
+                f"{str(nxt.get('mapped_products','') or 'related products')[:160]}."),
+                unsafe_allow_html=True)
+
+        st.markdown("##### Focus Category → Upcoming events & likely SKUs")
+        # explode affected_verticals so each focus category lists its events
+        fc = st.selectbox("Focus Category",
+                          ["All"] + (CFG.verticals if CFG else []))
+        evx = upcoming if not upcoming.empty else ev
+        if fc != "All":
+            evx = evx[evx["affected_verticals"].astype(str).str.contains(re.escape(fc))]
+        cols = ["event_name", "event_type", "event_date", "days_until_event",
+                "affected_verticals", "mapped_products", "seasonality_score",
+                "event_confidence_score"]
+        show = evx.sort_values("days_until_event") if "days_until_event" in evx else evx
+        st.dataframe(show[[c for c in cols if c in show.columns]].rename(
+            columns={"mapped_products": "likely_trending_SKUs",
+                     "affected_verticals": "focus_categories"}),
+            use_container_width=True, height=320)
     if not fp.empty and "linked_event_name" in fp:
         linked = fp[fp["linked_event_status"] != "not_found"]
         if not linked.empty:

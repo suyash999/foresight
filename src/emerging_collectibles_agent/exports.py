@@ -63,6 +63,26 @@ PRODUCT_COLUMNS = [
     "comic_publisher", "toy_brand", "watch_model", "watch_reference_number",
     "vinyl_artist", "vinyl_album", "limited_edition_flag",
     "score_explanation",
+    # reference-style / focus-category fields
+    "focus_category", "trend_confidence_pct", "matched_items",
+]
+
+# Consolidated, human-readable master export (SKU → focus-category precision,
+# row by row: what is trending, why, the event, the market, and the sources).
+MASTER_COLUMNS = [
+    "run_reference", "trending_date", "focus_category", "category", "subcategory",
+    "product_name", "brand", "franchise", "sport", "player_or_character",
+    "product_type", "set_name",
+    "EPS", "VTM", "trend_confidence_pct", "confidence_level",
+    "final_trend_status", "validation_status",
+    "matched_items", "total_source_count", "credible_source_count", "independent_domain_count",
+    "why_trending", "catalyst_summary", "key_trend_signals",
+    "linked_event_name", "linked_event_type", "linked_event_date", "linked_event_status",
+    "days_until_event", "days_since_event", "seasonality_score",
+    "detected_country", "detected_region", "market_scope", "global_signal_flag",
+    "scarcity_signal", "release_signal", "marketplace_signal",
+    "source_types", "source_domains", "primary_source_url", "source_urls",
+    "first_seen_at", "last_seen_at", "score_explanation",
 ]
 
 
@@ -191,8 +211,63 @@ def build_product_row(run_id: str, run_reference: int, product: NormalizedProduc
         "vinyl_album": rep.vinyl_album,
         "limited_edition_flag": rep.limited_edition_flag,
         "score_explanation": scored["score_explanation"],
+        "focus_category": rep.vertical,   # focus category == vertical
+        "trend_confidence_pct": round((scored["EPS"] + scored["VTM"]) / 2.0),
+        "matched_items": product.mention_count,
     }
     return row
+
+
+def build_master_row(product_row: dict) -> dict[str, Any]:
+    """Flatten a full product row into the consolidated master schema."""
+    return {
+        "run_reference": product_row.get("run_reference"),
+        "trending_date": product_row.get("trending_date"),
+        "focus_category": product_row.get("focus_category") or product_row.get("vertical"),
+        "category": product_row.get("category"),
+        "subcategory": product_row.get("subcategory"),
+        "product_name": product_row.get("product_name"),
+        "brand": product_row.get("brand"),
+        "franchise": product_row.get("franchise"),
+        "sport": product_row.get("sport"),
+        "player_or_character": product_row.get("player_or_character"),
+        "product_type": product_row.get("product_type"),
+        "set_name": product_row.get("set_name"),
+        "EPS": product_row.get("EPS"),
+        "VTM": product_row.get("VTM"),
+        "trend_confidence_pct": product_row.get("trend_confidence_pct"),
+        "confidence_level": product_row.get("confidence_level"),
+        "final_trend_status": product_row.get("final_trend_status"),
+        "validation_status": product_row.get("validation_status"),
+        "matched_items": product_row.get("matched_items"),
+        "total_source_count": product_row.get("total_source_count"),
+        "credible_source_count": product_row.get("credible_source_count"),
+        "independent_domain_count": product_row.get("independent_domain_count"),
+        "why_trending": product_row.get("ai_trend_reason"),
+        "catalyst_summary": product_row.get("catalyst_summary"),
+        "key_trend_signals": product_row.get("key_trend_signals"),
+        "linked_event_name": product_row.get("linked_event_name"),
+        "linked_event_type": product_row.get("linked_event_type"),
+        "linked_event_date": product_row.get("linked_event_date"),
+        "linked_event_status": product_row.get("linked_event_status"),
+        "days_until_event": product_row.get("days_until_event"),
+        "days_since_event": product_row.get("days_since_event"),
+        "seasonality_score": product_row.get("seasonality_score"),
+        "detected_country": product_row.get("detected_country"),
+        "detected_region": product_row.get("detected_region"),
+        "market_scope": product_row.get("market_scope"),
+        "global_signal_flag": product_row.get("global_signal_flag"),
+        "scarcity_signal": product_row.get("scarcity_signal_score"),
+        "release_signal": product_row.get("release_signal_score"),
+        "marketplace_signal": product_row.get("marketplace_signal_score"),
+        "source_types": product_row.get("source_types"),
+        "source_domains": product_row.get("source_domains"),
+        "primary_source_url": product_row.get("primary_source_url"),
+        "source_urls": product_row.get("source_urls"),
+        "first_seen_at": product_row.get("first_seen_at"),
+        "last_seen_at": product_row.get("last_seen_at"),
+        "score_explanation": product_row.get("score_explanation"),
+    }
 
 
 class Exporter:
@@ -227,10 +302,28 @@ class Exporter:
                 "final_trend_status": row["final_trend_status"],
                 "updated_at": utc_iso(),
             }, ["product_id"])
-        log.info("Exported %d products to CSV/Parquet/JSON", len(rows))
+        # consolidated master CSV — everything in one file, human-readable
+        master_rows = [build_master_row(r) for r in rows]
+        master_df = pd.DataFrame(master_rows, columns=MASTER_COLUMNS) if master_rows \
+            else pd.DataFrame(columns=MASTER_COLUMNS)
+        master_df = master_df.sort_values("EPS", ascending=False) if not master_df.empty else master_df
+        master_df.to_csv(os.path.join(self.output_dir, "master_intelligence_latest.csv"), index=False)
+        log.info("Exported %d products to CSV/Parquet/JSON + master CSV", len(rows))
         return df
 
     def save_aux(self) -> None:
+        # full exhaustive URL discovery list (every URL + why selected/rejected)
+        try:
+            self.db.table_df("url_discovery_log").to_csv(
+                os.path.join(self.output_dir, "url_discovery_latest.csv"), index=False)
+        except Exception:
+            pass
+        # event calendar (curated + discovered) with SKU-level product hints
+        try:
+            self.db.table_df("event_calendar").to_csv(
+                os.path.join(self.output_dir, "event_calendar_latest.csv"), index=False)
+        except Exception:
+            pass
         # source scores
         try:
             self.db.table_df("source_domains").to_csv(

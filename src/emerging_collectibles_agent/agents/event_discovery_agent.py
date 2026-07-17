@@ -18,6 +18,7 @@ from dateutil import parser as dateparser
 from ..config import Config
 from ..logging_config import get_logger
 from ..models import EventRecord, FetchedPage, NewsSignal
+from ..event_calendar_seed import CURATED_EVENTS
 from ..scoring.eps import event_proximity_score
 from ..taxonomy import detect_event_type, map_vertical
 from ..util import now_utc, sha1, utc_iso
@@ -148,33 +149,54 @@ class EventDiscoveryAgent:
             return []
         out = []
         today = now_utc().date()
-        for name, (month, verticals) in SEASONAL_EVENTS.items():
-            # compute next occurrence of that month
-            year = today.year if month >= today.month else today.year + 1
-            try:
-                event_date = today.replace(year=year, month=month, day=1)
-            except Exception:
-                continue
-            days_until = (event_date - today).days
-            if days_until > self.upcoming_window:
-                continue
+        allowed = set(self.verticals)
+        for ev in CURATED_EVENTS:
+            month = int(ev["month"])
+            monthly = ev.get("recurring_monthly")
+            if monthly or month == 0:
+                # recurs ~monthly (e.g. auction houses): next occurrence ~2 weeks out
+                event_date = today + __import__("datetime").timedelta(days=14)
+                days_until = 14
+            else:
+                year = today.year if month >= today.month else today.year + 1
+                day = ev.get("day") or 1
+                try:
+                    event_date = today.replace(year=year, month=month, day=min(day, 28))
+                except Exception:
+                    continue
+                # if that date already passed this year, roll to next year
+                if event_date < today:
+                    try:
+                        event_date = event_date.replace(year=event_date.year + 1)
+                    except Exception:
+                        continue
+                days_until = (event_date - today).days
+                if days_until > self.upcoming_window:
+                    continue
+            fcats = [v for v in ev["focus_categories"] if not allowed or v in allowed]
+            if not fcats:
+                fcats = ev["focus_categories"]
             half_life = 30.0
             proximity = math.exp(-abs(days_until) / half_life)
+            hints = ev.get("product_hints", [])
             out.append(EventRecord(
-                event_id=sha1(f"seasonal|{name}|{year}")[:16],
-                event_name=name,
-                event_type="cultural trend",
+                event_id=sha1(f"curated|{ev['name']}|{event_date.isoformat()}")[:16],
+                event_name=ev["name"],
+                event_type=ev.get("event_type", "cultural trend"),
                 event_date=event_date.isoformat(),
                 event_status="upcoming",
                 days_until_event=days_until,
-                affected_verticals=verticals,
-                event_source_url="calendar://seasonality",
-                event_source_domain="seasonality",
-                event_confidence_score=0.5,
-                seasonality_score=round(100 * proximity, 1),
+                affected_verticals=fcats,
+                affected_categories=ev.get("focus_categories", []),
+                mapped_products=hints,
+                event_source_url="calendar://curated",
+                event_source_domain="curated-calendar",
+                event_confidence_score=round(0.4 + 0.4 * float(ev.get("importance", 0.6)), 3),
+                seasonality_score=round(100 * proximity * float(ev.get("importance", 0.6)), 1),
                 expected_product_impact_reason=(
-                    f"{name} is a recurring seasonal catalyst (~{days_until} days away) "
-                    f"that historically lifts demand for {', '.join(verticals)}."
+                    f"{ev['name']} ({ev.get('event_type','event')}, ~{days_until} days away) "
+                    f"is a recurring catalyst for {', '.join(fcats)}. Likely to trend: "
+                    f"{'; '.join(hints[:4]) if hints else 'related products'}."
                 ),
             ))
         return out
