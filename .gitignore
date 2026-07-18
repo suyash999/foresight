@@ -34,3 +34,5 @@ outputs/*
 .mypy_cache/
 htmlcov/
 .coverage
+credentials.json
+*credentials*.json
