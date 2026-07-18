@@ -310,15 +310,11 @@ class Exporter:
         master_df = pd.DataFrame(master_rows, columns=MASTER_COLUMNS) if master_rows \
             else pd.DataFrame(columns=MASTER_COLUMNS)
         master_df = master_df.sort_values("EPS", ascending=False) if not master_df.empty else master_df
+        # latest snapshot only — this file is OVERWRITTEN each cycle (current cycle's
+        # products), so it never grows. Full appended history lives in Hermes.
         master_path = os.path.join(self.output_dir, "master_intelligence_latest.csv")
         master_df.to_csv(master_path, index=False)
-        # Local accumulating copy that MIRRORS the Hermes append — one durable copy
-        # on disk, one in Hermes. Header written once; each cycle appends its rows.
-        if not master_df.empty:
-            hist_path = os.path.join(self.output_dir, "master_intelligence_history.csv")
-            master_df.to_csv(hist_path, mode="a", index=False,
-                             header=not os.path.exists(hist_path))
-        log.info("Exported %d products to CSV/Parquet/JSON + master CSV (+ history)", len(rows))
+        log.info("Exported %d products to CSV/Parquet/JSON + master CSV", len(rows))
 
         # Hive sink (Krylov). write_mode=append => create table if absent, then
         # append this cycle's rows. Local CSVs are kept (clear_csv_after_write=false)
