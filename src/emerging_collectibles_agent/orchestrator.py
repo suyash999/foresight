@@ -13,17 +13,19 @@ before decay; source-quality memory shapes future priority.
 """
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import timedelta
 from typing import Optional
+from urllib.parse import urlparse
 
 from .config import Config
 from .db import Database
 from .exports import Exporter, build_product_row
 from .llm.client import LLMClient
 from .logging_config import get_logger
-from .models import DiscoveredURL
-from .util import now_utc, registered_domain, utc_iso
+from .models import DiscoveredURL, FetchedPage
+from .util import now_utc, registered_domain, sha1, utc_iso
 
 from .agents.source_discovery_agent import SourceDiscoveryAgent
 from .agents.source_verification_agent import SourceVerificationAgent
@@ -144,6 +146,14 @@ class Orchestrator:
             event_records += r_e
             source_type_by_domain["reddit.com"] = "collector forum"
 
+        # FEED-METADATA extraction (no crawl): every discovery entry contributes
+        # products from its title/summary/URL slug — so 407/robots-blocked sites
+        # still yield emerging-product signals into the master CSV.
+        feed_c, feed_st = self._extract_from_feed_metadata(run_id, discovered)
+        candidates += feed_c
+        for _dom, _st in feed_st.items():
+            source_type_by_domain.setdefault(_dom, _st)
+
         # seasonal events (calendar-driven)
         event_records += self.events.seasonal_events()
         self._cycle_stats["events_extracted"] = len(event_records)
@@ -224,10 +234,17 @@ class Orchestrator:
 
     def _build_queue(self, discovered: list[DiscoveredURL]) -> list[dict]:
         queue = []
+        skipped_blocked = 0
+        skip_blocked = self.config.get("scraping.skip_known_blocked_domains", True)
         for d in discovered:
             if d.selection_status != "selected":
                 continue
             if self.failure.is_suppressed(d.url, d.domain):
+                continue
+            # don't re-hit a host that has only ever been blocked (407/403/robots);
+            # feed-metadata extraction still mines its title/summary without crawling
+            if skip_blocked and self.memory.is_blocked_domain(d.domain):
+                skipped_blocked += 1
                 continue
             verification = self.verifier.verify(d)
             if not verification.crawl_allowed:
@@ -241,7 +258,70 @@ class Orchestrator:
                           "verification": verification, "score": score,
                           "priority": final_priority, "depth": d.depth})
         queue.sort(key=lambda x: x["priority"], reverse=True)
+        if skipped_blocked:
+            log.info("Skipped %d urls on known-blocked domains (feed metadata still used)",
+                     skipped_blocked)
         return queue
+
+    @staticmethod
+    def _slug_words(url: str) -> str:
+        """Turn a URL's last path segment into readable words — often the product.
+
+        e.g. .../2026-panini-prizm-fifa-world-cup-soccer-cards -> that phrase.
+        """
+        try:
+            seg = [s for s in urlparse(url).path.split("/") if s]
+            if not seg:
+                return ""
+            last = re.sub(r"\.(html?|php|aspx?)$", "", seg[-1])
+            words = re.sub(r"[-_]+", " ", last).strip()
+            if len(words) < 4 or words.replace(" ", "").isdigit():
+                return ""
+            return words
+        except Exception:
+            return ""
+
+    def _extract_from_feed_metadata(self, run_id: str, discovered: list[DiscoveredURL]):
+        """No-crawl extraction: mine product candidates straight from discovery
+        metadata (title + summary + URL slug). Every source (RSS, News, Wikipedia,
+        Shopify, Reddit, GDELT, Trends, catalogs) contributes products even when
+        the underlying page is blocked (407) or disallowed (robots) — no site hit.
+        """
+        if not self.config.get("extraction.enable_feed_extraction", True):
+            return [], {}
+        candidates = []
+        source_type_by_domain: dict[str, str] = {}
+        seen_urls: set[str] = set()
+        used = 0
+        for d in discovered:
+            if d.selection_status != "selected" or d.url in seen_urls:
+                continue
+            seen_urls.add(d.url)
+            title = (d.title or "").strip()
+            snippet = (d.snippet or "").strip()
+            slug = self._slug_words(d.url)
+            parts = [p for p in (title, snippet, slug) if p]
+            if not parts:
+                continue
+            text = ". ".join(parts)
+            if len(text) < 8:
+                continue
+            page = FetchedPage(
+                url=d.url, domain=d.domain, status="ok", http_status=0,
+                title=title or slug, text=text[:2000],
+                published_at=d.published_at, extraction_method="feed_metadata",
+                meta={"discovery_method": d.discovery_method, "source_type": d.source_type},
+                fetched_at=utc_iso(), text_hash=sha1(text[:1000]),
+            )
+            pcs = self.extractor.extract(page)
+            if pcs:
+                candidates.extend(pcs)
+                if d.domain:
+                    source_type_by_domain.setdefault(d.domain, d.source_type or "unknown")
+            used += 1
+        log.info("Feed-metadata extraction: %d candidates from %d discovery entries (no crawl)",
+                 len(candidates), used)
+        return candidates, source_type_by_domain
 
     def _crawl_and_extract(self, run_id: str, queue: list[dict]):
         candidates = []

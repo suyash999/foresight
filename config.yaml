@@ -646,6 +646,18 @@ scraping:
   jina_api_key_env: "JINA_API_KEY"  # needs a (free-tier) key; used as a compliant fetch fallback
   max_bytes_per_page: 3000000
   retry_on_network_error: 2
+  skip_known_blocked_domains: true  # stop re-crawling hosts that only ever return 407/403/robots
+
+# ---------------------------------------------------------------------------
+# Extraction behaviour
+# ---------------------------------------------------------------------------
+extraction:
+  # Mine product candidates DIRECTLY from discovery metadata (RSS/News/Wikipedia/
+  # Shopify/GDELT/Reddit title + summary + URL slug) with NO page crawl. This
+  # means blocked (407) or robots-disallowed sites still contribute emerging
+  # products to the master CSV. Full-page crawling still runs as the richer path;
+  # this is an always-on supplement/fallback.
+  enable_feed_extraction: true
 
 # ---------------------------------------------------------------------------
 # LLM (optional enhancement; deterministic fallback always available)
@@ -849,7 +861,8 @@ hive_sink:
   table: "foresight1"
   write_mode: "append"                 # append = keep dated history in Hermes; replace = mirror latest
   batch_size: 50
-  clear_csv_after_write: true          # empty master CSV once rows are safely in Hive
+  clear_csv_after_write: false         # KEEP the master CSV for now so you can inspect it;
+                                       # flip back to true once the Hermes write is confirmed
 
 # ---------------------------------------------------------------------------
 # Optional Cloud Code / Kryo governance adapter (disabled by default)

@@ -124,6 +124,17 @@ class SelfLearningMemory:
     def priority_adjusted(self, base: float, failure_count: int) -> float:
         return base * math.exp(-self.failure_penalty * max(0, failure_count))
 
+    def is_blocked_domain(self, domain: str, min_blocks: int = 2) -> bool:
+        """A domain we should stop crawling: it has been blocked (407/403/429/
+        robots) at least `min_blocks` times and has never fetched successfully.
+        Lets the queue skip hopeless hosts so we don't waste time re-hitting them.
+        """
+        if not domain:
+            return False
+        row = self._get_row(domain)
+        return (int(row.get("blocked_count", 0)) >= min_blocks
+                and int(row.get("success_count", 0)) == 0)
+
     def decay_fatigue(self, factor: float = 0.5) -> None:
         """Called between cycles: recent crawl counts decay so sources recover."""
         rows = self.db.query("SELECT domain, recent_crawl_count FROM source_quality_memory")

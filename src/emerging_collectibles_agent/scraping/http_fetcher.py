@@ -114,6 +114,12 @@ class HTTPFetcher:
                         page.error_message = f"HTTP {code} (login/anti-bot; not bypassed)"
                         self.throttle.penalize(host, 30.0)
                         return page
+                    if code == 407:
+                        # proxy auth required — retrying the same request is
+                        # pointless; mark blocked and move on (no retry).
+                        page.status = "blocked"
+                        page.error_message = "HTTP 407 proxy auth (not retried)"
+                        return page
                     if code == 404:
                         page.status = "error"
                         page.error_message = "HTTP 404"
