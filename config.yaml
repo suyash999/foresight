@@ -28,6 +28,11 @@ network:
 # ---------------------------------------------------------------------------
 runtime:
   mode: "continuous"              # one-shot | continuous | scheduled
+  # LIGHT MODE (true) = no website crawling at all: products are built purely from
+  # feed/API metadata (RSS/Shopify/Wikipedia/catalog titles + summaries + URL
+  # slugs). Fast, no 407/robots waits. Set false for the HEAVY crawler that also
+  # fetches full pages.
+  light_mode: true
   auto_start_worker: true
   crawl_interval_seconds: 900     # sleep between cycles in continuous mode
   dashboard_auto_refresh_seconds: 30
@@ -844,9 +849,12 @@ dashboard:
 # Disabled by default; only runs where PyHive + Kerberos are available.
 # ---------------------------------------------------------------------------
 hive_sink:
-  enabled: false                       # set true on Krylov
+  enabled: false                       # set true on Krylov (leave OFF for light-mode CSV test)
+  method: "odbc"                       # odbc (Simba+Kerberos, proven for Hermes) | pyhive
+  odbc_driver: "/opt/simba/carmel/libSparkODBC64.so"
+  krb_realm: "PROD.EBAY.COM"
   host: "hermes.prod.vip.ebay.com"
-  port: 10000
+  port: 10001                          # Hermes ODBC port (per working reference)
   auth: "KERBEROS"                     # used only if no credentials.json password is found
   kerberos_service_name: "b_carmel"
   username_env: "KRYLOV_PRINCIPAL"     # Kerberos principal from env (no secrets in code)

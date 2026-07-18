@@ -128,15 +128,25 @@ class Orchestrator:
         log.info("Discovered %d urls (%d selected); vertical coverage %.2f",
                  coverage["discovered"], coverage["selected"], coverage["vertical_coverage_score"])
 
-        # 2-4. VERIFY + SCORE + PRIORITIZE
-        self._heartbeat("VERIFY_SOURCES", run_id)
-        queue = self._build_queue(discovered)
-        log.info("Crawl queue built: %d urls", len(queue))
+        # LIGHT MODE: skip all page crawling. Products come purely from the feed/
+        # API metadata (RSS/Shopify/Wikipedia/catalog titles + summaries + URL
+        # slugs). No site hits => no 407/robots waits => fast cycles.
+        light_mode = bool(self.config.get("runtime.light_mode", False))
 
-        # 5-8. CRAWL + EXTRACT + NEWS + EVENTS (with bounded recursion)
-        self._heartbeat("CRAWL_PAGES", run_id)
-        candidates, news_signals, event_records, source_type_by_domain = \
-            self._crawl_and_extract(run_id, queue)
+        if light_mode:
+            log.info("LIGHT MODE: skipping page crawl; using feed/API metadata only.")
+            candidates, news_signals, event_records = [], [], []
+            source_type_by_domain = {}
+        else:
+            # 2-4. VERIFY + SCORE + PRIORITIZE
+            self._heartbeat("VERIFY_SOURCES", run_id)
+            queue = self._build_queue(discovered)
+            log.info("Crawl queue built: %d urls", len(queue))
+
+            # 5-8. CRAWL + EXTRACT + NEWS + EVENTS (with bounded recursion)
+            self._heartbeat("CRAWL_PAGES", run_id)
+            candidates, news_signals, event_records, source_type_by_domain = \
+                self._crawl_and_extract(run_id, queue)
 
         # Reddit official API (compliant) — process post text directly, no crawl
         if self.reddit_api.available():

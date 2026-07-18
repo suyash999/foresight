@@ -89,6 +89,10 @@ class HiveSink:
         self.table = hs.get("table", "foresight1")
         self.write_mode = hs.get("write_mode", "replace")   # replace | append
         self.batch_size = int(hs.get("batch_size", 50))
+        # connection method: "odbc" (Simba+Kerberos, proven for eBay Hermes) | "pyhive"
+        self.method = hs.get("method", "odbc")
+        self.odbc_driver = hs.get("odbc_driver", "/opt/simba/carmel/libSparkODBC64.so")
+        self.krb_realm = hs.get("krb_realm", "PROD.EBAY.COM")
         # Optional username/password auth via a credentials file (used when
         # Kerberos is unavailable — e.g. no KDC for the realm). If the file
         # exists and carries a password, we connect with LDAP/CUSTOM SASL PLAIN
@@ -135,6 +139,17 @@ class HiveSink:
         return f"{self.database}.{self.table}"
 
     def _connect(self):
+        # ODBC path (eBay Hermes/Carmel via Simba Spark ODBC + Kerberos) — this is
+        # the connection style proven to work in the user's notebook environment.
+        if self.method == "odbc":
+            import pyodbc  # lazy
+            log.info("Hive sink: connecting to %s:%s via Simba ODBC + Kerberos.",
+                     self.host, self.port)
+            return pyodbc.connect(
+                Driver=self.odbc_driver, HOST=self.host, PORT=self.port,
+                autocommit=True, SSL=1, AUTHMECH=1,
+                KrbRealm=self.krb_realm, KrbHostFQDN=self.host,
+                KrbServiceName=self.kerberos_service_name, DelegateKrbCreds=1)
         import pyhive.hive  # lazy: only needed on Krylov
         if self._creds:
             # password (SASL PLAIN) auth — no Kerberos ticket needed
