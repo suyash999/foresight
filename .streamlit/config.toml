@@ -1,0 +1,8 @@
+# Reverse-proxy-friendly defaults (Krylov jupyter-server-proxy at /proxy/8888/).
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = false
+[browser]
+gatherUsageStats = false
