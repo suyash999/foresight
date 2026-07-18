@@ -50,7 +50,8 @@ log = get_logger("orchestrator")
 class Orchestrator:
     def __init__(self, config: Config):
         self.config = config
-        self.db = Database(config.database_path)
+        self.db = Database(config.database_path,
+                           journal_mode=config.get("database_journal_mode", "DELETE"))
         self.memory = SelfLearningMemory(self.db, config)
         self.llm = LLMClient(config)
 

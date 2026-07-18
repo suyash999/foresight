@@ -822,6 +822,9 @@ geography:
 # Persistence / outputs
 # ---------------------------------------------------------------------------
 database_path: "data/collectibles.db"
+# SQLite journal mode. DELETE is safe on network filesystems (Krylov NFS).
+# WAL is faster on LOCAL disk but SIGBUS/corrupts over NFS — do not use on Krylov.
+database_journal_mode: "DELETE"
 output_dir: "outputs"
 
 # ---------------------------------------------------------------------------

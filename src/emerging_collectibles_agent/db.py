@@ -17,14 +17,22 @@ from .storage.migrations import migrate
 
 
 class Database:
-    def __init__(self, path: str):
+    def __init__(self, path: str, journal_mode: str = "DELETE"):
         self.path = path
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # WAL uses a memory-mapped -shm file, which SIGBUS/corrupts on network
+        # filesystems (Krylov mounts the workspace over NFS). DELETE (classic
+        # rollback journal) is NFS-safe. Override via config if on local disk.
+        try:
+            self._conn.execute(f"PRAGMA journal_mode={journal_mode}")
+        except Exception:
+            self._conn.execute("PRAGMA journal_mode=DELETE")
         self._conn.execute("PRAGMA synchronous=NORMAL")
+        # never memory-map the DB file on NFS
+        self._conn.execute("PRAGMA mmap_size=0")
         migrate(self._conn)
 
     # -- generic ------------------------------------------------------------
