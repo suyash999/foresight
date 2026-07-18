@@ -13,6 +13,7 @@ from dateutil import parser as dateparser
 from ..config import Config
 from ..logging_config import get_logger
 from ..models import EPSBreakdown, EventRecord, VTMBreakdown
+from ..util import dump_model
 from .product_normalization_agent import NormalizedProduct
 from ..scoring import classify_trend_status, confidence_from_scores
 from ..scoring.credibility import evidence_quality_score
@@ -235,8 +236,8 @@ class TrendScoringAgent:
         )
 
         return {
-            "eps_breakdown": eps_b.model_dump(),
-            "vtm_breakdown": vtm_b.model_dump(),
+            "eps_breakdown": dump_model(eps_b),
+            "vtm_breakdown": dump_model(vtm_b),
             "EPS": eps, "VTM": vtm,
             "final_trend_status": status,
             "confidence_level": confidence,

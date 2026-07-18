@@ -32,6 +32,24 @@ def utc_iso(dt: datetime | None = None) -> str:
     return dt.astimezone(timezone.utc).isoformat()
 
 
+def dump_model(m):
+    """Export a Pydantic model to a dict on either Pydantic v1 or v2.
+
+    Krylov's conda base ships Pydantic v1 (no ``model_dump``); local/dev envs
+    have v2 (no ``.dict()`` deprecation). This bridges both.
+    """
+    if hasattr(m, "model_dump"):
+        return m.model_dump()
+    return m.dict()
+
+
+def validate_model(model_cls, data):
+    """Construct a Pydantic model from a dict on either Pydantic v1 or v2."""
+    if hasattr(model_cls, "model_validate"):
+        return model_cls.model_validate(data)
+    return model_cls.parse_obj(data)
+
+
 def to_ist_iso(dt: datetime | None = None, tz_name: str = "Asia/Kolkata") -> str:
     dt = dt or now_utc()
     if dt.tzinfo is None:

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from ..config import Config
 from ..logging_config import get_logger
+from ..util import validate_model
 from .json_repair import extract_json
 
 log = get_logger("llm.client")
@@ -77,7 +78,7 @@ class LLMClient:
         if data is None:
             return None
         try:
-            return model_cls.model_validate(data)
+            return validate_model(model_cls, data)
         except Exception as exc:
             log.warning("LLM output failed schema validation for %s: %s",
                         model_cls.__name__, exc)
