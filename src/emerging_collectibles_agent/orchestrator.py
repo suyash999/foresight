@@ -330,8 +330,10 @@ class Orchestrator:
         source_type_by_domain: dict[str, str] = {}
         visited: set[str] = set()
         per_domain: dict[str, int] = {}
+        blocked_this_cycle: set[str] = set()   # hosts that 407/403/429'd — skip their rest
         pages_done = 0
         recovery_used = 0
+        skipped_host_blocked = 0
         # use a mutable list as a growable queue for recursion
         work = list(queue)
         idx = 0
@@ -341,6 +343,9 @@ class Orchestrator:
             url = item["url"]
             domain = item["domain"]
             if url in visited:
+                continue
+            if domain in blocked_this_cycle:
+                skipped_host_blocked += 1
                 continue
             if per_domain.get(domain, 0) >= self.max_pages_per_domain:
                 continue
@@ -389,6 +394,10 @@ class Orchestrator:
             else:
                 # failure path → recovery ladder before decay
                 ftype = classify_failure(page)
+                # host-level blocks (proxy 407, 403, rate-limit 429) apply to the
+                # whole domain — skip its remaining queued urls this cycle
+                if ftype in ("http_407", "http_403", "http_429"):
+                    blocked_this_cycle.add(domain)
                 if page.status in ("blocked", "robots_blocked"):
                     self._cycle_stats["urls_blocked"] += 1
                 self._cycle_stats["errors"] += 1
@@ -408,8 +417,10 @@ class Orchestrator:
                             candidates.extend(self.extractor.extract(page2))
             if pages_done % 10 == 0:
                 self._heartbeat("CRAWL_PAGES", run_id)
-        log.info("Crawled %d pages, extracted %d candidates, %d news, %d events",
-                 pages_done, len(candidates), len(news_signals), len(event_records))
+        log.info("Crawled %d pages, extracted %d candidates, %d news, %d events"
+                 " (skipped %d urls on hosts blocked mid-cycle)",
+                 pages_done, len(candidates), len(news_signals), len(event_records),
+                 skipped_host_blocked)
         return candidates, news_signals, event_records, source_type_by_domain
 
     def _process_reddit_api(self, run_id: str):

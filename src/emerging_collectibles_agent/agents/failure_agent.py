@@ -20,6 +20,7 @@ RECOVERABLE = {
     "timeout": "retry_backoff",
     "http_429": "backoff_suppress",
     "http_403": "alternative_source",
+    "http_407": "alternative_source",
     "blocked_by_robots": "alternative_source",
     "llm_json_failed": "deterministic_fallback",
     "no_product_found": "deprioritize",
@@ -51,7 +52,7 @@ class FailureAgent:
         if failure_type in ("http_429",):
             suppress_until = utc_iso(now + timedelta(minutes=30))
             decay = 0.3
-        elif failure_type in ("http_403", "blocked_by_robots"):
+        elif failure_type in ("http_403", "http_407", "blocked_by_robots"):
             suppress_until = utc_iso(now + timedelta(hours=6))
             decay = 0.2
         elif failure_type in ("timeout", "parser_failed"):
@@ -76,7 +77,7 @@ class FailureAgent:
             "failed_strategy": "", "retry_count": retry_count, "timestamp": utc_iso(now),
         })
         if self.memory and decay > 0:
-            self.memory.record_result(domain, blocked=failure_type in ("http_429", "http_403", "blocked_by_robots"),
+            self.memory.record_result(domain, blocked=failure_type in ("http_429", "http_403", "http_407", "blocked_by_robots"),
                                       success=False)
         log.info("FAILURE %s %s -> %s (%s)", failure_type, url, recovery_action, final_status)
         return recovery_action if isinstance(recovery_action, int) else 0

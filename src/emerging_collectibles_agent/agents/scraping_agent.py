@@ -28,6 +28,8 @@ def classify_failure(page: FetchedPage) -> str:
         return "http_403"
     if page.http_status == 404:
         return "http_404"
+    if page.http_status == 407:
+        return "http_407"     # proxy auth — host is unreachable, don't retry
     if page.http_status == 429:
         return "http_429"
     msg = (page.error_message or "").lower()
