@@ -8,11 +8,35 @@
 
 # --- proxy + PATH (lets Krylov hit the net) — re-applied on every run --------
 export PATH="/home/$KRYLOV_PRINCIPAL/.local/bin:$PATH"
-export HTTP_PROXY="http://httpproxy-tcop.vip.ebay.com:80"
-export HTTPS_PROXY="http://httpproxy-tcop.vip.ebay.com:80"
-export NO_PROXY="localhost,127.0.0.1,::1"
 
-PROXY="http://httpproxy-tcop.vip.ebay.com:80"
+# The eBay Squid proxy needs Basic auth. If HTTPS_PROXY is already exported with
+# credentials (http://user:pass@host:port) we keep it. Otherwise, if a
+# credentials.json with a proxy_user/proxy_password (or username/password) is
+# present, build an authenticated proxy URL from it. Falls back to the bare proxy.
+_BARE_PROXY="http://httpproxy-tcop.vip.ebay.com:80"
+if printf '%s' "$HTTPS_PROXY" | grep -q '@'; then
+  : # already authenticated — leave it as-is
+elif [ -f credentials.json ]; then
+  AUTH_PROXY="$(python3 - <<'PY'
+import json, urllib.parse
+try:
+    d = json.load(open("credentials.json"))
+    u = d.get("proxy_user") or d.get("username")
+    p = d.get("proxy_password") or d.get("password")
+    if u and p:
+        print(f"http://{urllib.parse.quote(u)}:{urllib.parse.quote(p)}@httpproxy-tcop.vip.ebay.com:80")
+except Exception:
+    pass
+PY
+)"
+  export HTTPS_PROXY="${AUTH_PROXY:-$_BARE_PROXY}"
+else
+  export HTTPS_PROXY="$_BARE_PROXY"
+fi
+export HTTP_PROXY="$HTTPS_PROXY"
+export NO_PROXY="localhost,127.0.0.1,::1,.vip.ebay.com,.corp.ebay.com"
+
+PROXY="$HTTPS_PROXY"
 PORT="${1:-8888}"
 cd "$(dirname "$0")"
 

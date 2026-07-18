@@ -11,7 +11,10 @@ import pytz
 try:
     import tldextract
 
-    _TLD = tldextract.TLDExtract(cache_dir=None)
+    # suffix_list_urls=() forces tldextract to use its bundled snapshot and NEVER
+    # hit the network. On locked-down/proxied hosts the live fetch to
+    # publicsuffix.org otherwise throws a noisy (caught) 407/proxy traceback.
+    _TLD = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 except Exception:  # pragma: no cover
     _TLD = None
 
