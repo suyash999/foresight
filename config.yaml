@@ -513,7 +513,11 @@ url_discovery:
 # ---------------------------------------------------------------------------
 search_providers:
   google_custom_search:
-    enabled: true                      # add GOOGLE_CUSTOM_SEARCH_API_KEY to .env to activate
+    # NOTE: Google closed the Custom Search JSON API to NEW customers. A newly
+    # created GCP project returns 403 "project does not have access" no matter
+    # what — so this only works with an OLD project that was already a customer.
+    # Off by default for that reason. cx stays baked in case you have such a key.
+    enabled: false
     api_key_env: "GOOGLE_CUSTOM_SEARCH_API_KEY"
     cx_env: "GOOGLE_CUSTOM_SEARCH_CX"
     cx: "d1226d0d467ff4133"            # Foresight CSE id (not secret); env var overrides if set
