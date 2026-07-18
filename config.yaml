@@ -835,9 +835,16 @@ hive_sink:
   enabled: false                       # set true on Krylov
   host: "hermes.prod.vip.ebay.com"
   port: 10000
-  auth: "KERBEROS"
+  auth: "KERBEROS"                     # used only if no credentials.json password is found
   kerberos_service_name: "b_carmel"
   username_env: "KRYLOV_PRINCIPAL"     # Kerberos principal from env (no secrets in code)
+  # If Kerberos is unavailable (no KDC for the realm), drop a credentials.json in
+  # the repo root with a username + password and it will connect via LDAP/SASL
+  # PLAIN instead — no Kerberos ticket needed. Recognized keys:
+  #   {"username": "...", "password": "...", "auth": "LDAP",
+  #    "host": "...", "port": 10000, "database": "...", "table": "..."}
+  # host/port/database/table/auth in the file override the values here.
+  credentials_file: "credentials.json"
   database: "P_UKPLAN_BACKUPS_T"
   table: "foresight1"
   write_mode: "append"                 # append = keep dated history in Hermes; replace = mirror latest

@@ -13,6 +13,8 @@ Design:
 """
 from __future__ import annotations
 
+import json
+import os
 from typing import Any
 
 import pandas as pd
@@ -87,6 +89,46 @@ class HiveSink:
         self.table = hs.get("table", "foresight1")
         self.write_mode = hs.get("write_mode", "replace")   # replace | append
         self.batch_size = int(hs.get("batch_size", 50))
+        # Optional username/password auth via a credentials file (used when
+        # Kerberos is unavailable — e.g. no KDC for the realm). If the file
+        # exists and carries a password, we connect with LDAP/CUSTOM SASL PLAIN
+        # instead of Kerberos. The file may also override host/port/db/table/auth.
+        self.credentials_file = hs.get("credentials_file", "credentials.json")
+        self._creds = self._load_credentials()
+        if self._creds:
+            # let the creds file centralize connection details if it wants to
+            self.host = self._creds.get("host", self.host)
+            self.port = int(self._creds.get("port", self.port))
+            self.database = self._creds.get("database", self.database)
+            self.table = self._creds.get("table", self.table)
+            self.username = self._creds.get("username", self.username)
+
+    def _load_credentials(self) -> dict | None:
+        """Read credentials.json if present. Tolerant of common key names.
+
+        Recognized keys: username|user|principal, password|passwd|pass|secret,
+        and optionally host, port, database, table, auth. Returns None if no
+        usable password is found (falls back to Kerberos).
+        """
+        path = self.credentials_file
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except Exception as exc:
+            log.warning("Hive sink: could not read %s (%s); falling back to Kerberos.", path, exc)
+            return None
+        user = data.get("username") or data.get("user") or data.get("principal")
+        pw = data.get("password") or data.get("passwd") or data.get("pass") or data.get("secret")
+        if not pw:
+            log.warning("Hive sink: %s has no password field; falling back to Kerberos.", path)
+            return None
+        out = {"username": user, "password": pw}
+        for k in ("host", "port", "database", "table", "auth"):
+            if data.get(k):
+                out[k] = data[k]
+        return out
 
     @property
     def fqtn(self) -> str:
@@ -94,6 +136,19 @@ class HiveSink:
 
     def _connect(self):
         import pyhive.hive  # lazy: only needed on Krylov
+        if self._creds:
+            # password (SASL PLAIN) auth — no Kerberos ticket needed
+            auth = self._creds.get("auth", self.auth)
+            if auth not in ("LDAP", "CUSTOM", "PLAIN", "NONE"):
+                auth = "LDAP"
+            log.info("Hive sink: connecting to %s:%s as %s via %s (credentials.json).",
+                     self.host, self.port, self._creds.get("username"), auth)
+            return pyhive.hive.connect(
+                host=self.host, port=self.port, auth=auth,
+                username=self._creds.get("username"), password=self._creds.get("password"))
+        # default: Kerberos
+        log.info("Hive sink: connecting to %s:%s via KERBEROS (principal %s).",
+                 self.host, self.port, self.username)
         return pyhive.hive.connect(
             host=self.host, port=self.port, auth=self.auth,
             kerberos_service_name=self.kerberos_service_name, username=self.username)
@@ -124,8 +179,8 @@ class HiveSink:
         if master_df is None or master_df.empty:
             log.info("Hive sink: master frame empty; nothing to write.")
             return False
-        if not self.username:
-            log.warning("Hive sink enabled but KRYLOV_PRINCIPAL not set; skipping.")
+        if not self._creds and not self.username:
+            log.warning("Hive sink enabled but no credentials.json and KRYLOV_PRINCIPAL not set; skipping.")
             return False
         try:
             conn = self._connect()
