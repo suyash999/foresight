@@ -535,7 +535,14 @@ search_providers:
   wikidata:
     enabled: true                  # free, no key
   reddit:
-    enabled: true                  # public RSS only (keyless, compliant)
+    enabled: true                  # public RSS discovery (keyless) — auto-skipped if reddit_api on
+  reddit_api:
+    enabled: false                 # official Reddit Data API (set true + add creds to .env)
+    client_id_env: "REDDIT_CLIENT_ID"
+    client_secret_env: "REDDIT_CLIENT_SECRET"
+    user_agent: "python:foresight-collectibles:1.0 (research)"
+    limit_per_subreddit: 25
+    max_subreddits_per_cycle: 22
   hackernews:
     enabled: true                  # Algolia public API (keyless)
 

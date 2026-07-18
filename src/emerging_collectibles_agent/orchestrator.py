@@ -40,6 +40,7 @@ from .agents.failure_agent import FailureAgent
 from .agents.self_learning_memory import SelfLearningMemory
 from .agents.adaptive_strategy_router import AdaptiveStrategyRouter
 from .agents.self_serve_recovery_agent import SelfServeRecoveryAgent
+from .scraping.reddit_api import RedditAPIClient
 
 log = get_logger("orchestrator")
 
@@ -66,6 +67,7 @@ class Orchestrator:
         self.failure = FailureAgent(config, self.db, self.memory)
         self.recovery = SelfServeRecoveryAgent(config, self.db, self.scraper,
                                                self.router, self.discovery, self.memory)
+        self.reddit_api = RedditAPIClient(config)
         self.exporter = Exporter(config, self.db)
 
         sc = config.get("scraping", {})
@@ -133,6 +135,14 @@ class Orchestrator:
         self._heartbeat("CRAWL_PAGES", run_id)
         candidates, news_signals, event_records, source_type_by_domain = \
             self._crawl_and_extract(run_id, queue)
+
+        # Reddit official API (compliant) — process post text directly, no crawl
+        if self.reddit_api.available():
+            r_c, r_n, r_e = self._process_reddit_api(run_id)
+            candidates += r_c
+            news_signals += r_n
+            event_records += r_e
+            source_type_by_domain["reddit.com"] = "collector forum"
 
         # seasonal events (calendar-driven)
         event_records += self.events.seasonal_events()
@@ -322,6 +332,41 @@ class Orchestrator:
                  pages_done, len(candidates), len(news_signals), len(event_records))
         return candidates, news_signals, event_records, source_type_by_domain
 
+    def _process_reddit_api(self, run_id: str):
+        """Fetch Reddit posts via the official API and run them through
+        extraction / news / events directly (no crawling of robots-blocked pages)."""
+        candidates, news_signals, events = [], [], []
+        try:
+            pages = self.reddit_api.fetch_pages()
+        except Exception as exc:
+            log.warning("Reddit API step failed: %s", exc)
+            return candidates, news_signals, events
+        cred = self.config.get("source_credibility_baselines", {}).get("collector forum", 0.65)
+        for page in pages:
+            try:
+                pc = self.extractor.extract(page)
+                candidates.extend(pc)
+                ns = self.news.analyze(page, cred)
+                if ns:
+                    news_signals.append(ns)
+                ev = self.events.from_page(page)
+                if ev:
+                    events.append(ev)
+                self.db.insert("crawl_urls", {
+                    "run_id": run_id, "url": page.url, "domain": "reddit.com",
+                    "source_type": "collector forum", "discovered_at": utc_iso(),
+                    "last_crawled_at": utc_iso(), "crawl_status": "ok (reddit_api)",
+                    "crawl_priority_score": 0.6, "page_relevance_score": 0.6,
+                    "source_credibility_score": cred,
+                    "product_signal_score": 0.5 if pc else 0.0, "error_message": "",
+                })
+            except Exception as exc:
+                log.debug("Reddit page process error: %s", exc)
+        self._cycle_stats["urls_crawled"] = self._cycle_stats.get("urls_crawled", 0) + len(pages)
+        log.info("Reddit API: %d posts -> %d candidates, %d news, %d events",
+                 len(pages), len(candidates), len(news_signals), len(events))
+        return candidates, news_signals, events
+
     def _news_catalyst_map(self, news_signals) -> dict:
         m: dict[str, float] = {}
         for ns in news_signals:
@@ -421,5 +466,6 @@ class Orchestrator:
             self.scraper.close()
             self.discovery.close()
             self.recovery.tool_agent.close()
+            self.reddit_api.close()
         except Exception:
             pass

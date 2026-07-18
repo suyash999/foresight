@@ -184,6 +184,10 @@ class SourceDiscoveryAgent:
         if not self.ud.get("enable_reddit_discovery", True) or \
                 not self.sp.get("reddit", {}).get("enabled", True):
             return []
+        # if the official Reddit API is enabled, it supersedes RSS crawl (avoids
+        # crawling robots-blocked comment pages)
+        if self.sp.get("reddit_api", {}).get("enabled", False):
+            return []
         subs = self.config.get("seed_reddit_subreddits", [])
         if not subs:
             return []
