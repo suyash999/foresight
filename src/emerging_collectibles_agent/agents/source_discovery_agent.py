@@ -449,45 +449,8 @@ class SourceDiscoveryAgent:
         if not self.ud.get("enable_search_api_discovery", True):
             return []
         out: list[DiscoveredURL] = []
-        out += self._google_cse(queries)
         out += self._bing(queries)
         out += self._serpapi(queries)
-        return out
-
-    def _google_cse(self, queries) -> list[DiscoveredURL]:
-        conf = self.sp.get("google_custom_search", {})
-        if not conf.get("enabled"):
-            return []
-        key = self.config.env(conf.get("api_key_env", "GOOGLE_CUSTOM_SEARCH_API_KEY"))
-        # cx can come from env OR be baked into config (cx is not secret)
-        cx = self.config.env(conf.get("cx_env", "GOOGLE_CUSTOM_SEARCH_CX")) or conf.get("cx")
-        if not key or not cx:
-            return []
-        # protect the free quota (100/day): cap queries per cycle
-        cap = int(conf.get("max_queries_per_cycle", 15))
-        out, fails = [], 0
-        for vertical, query in queries[:cap]:
-            if not self._time_left() or fails >= _CIRCUIT_BREAK_FAILS:
-                break
-            try:
-                resp = self._client.get("https://www.googleapis.com/customsearch/v1",
-                                        params={"key": key, "cx": cx, "q": query, "num": 10})
-                if resp.status_code != 200:   # 429 quota / 403 bad key
-                    fails += 1
-                    log.debug("Google CSE HTTP %s for %s", resp.status_code, query)
-                    continue
-                data = resp.json()
-                fails = 0
-            except Exception:
-                fails += 1
-                continue
-            for item in data.get("items", []):
-                du = self._make_url(item.get("link", ""), "search_api", "google_cse",
-                                    "unknown", [vertical], seed_query=query,
-                                    title=item.get("title", ""), snippet=item.get("snippet", ""))
-                if du:
-                    out.append(du)
-        log.info("Google CSE discovered %d urls (cap %d)", len(out), cap)
         return out
 
     def _bing(self, queries) -> list[DiscoveredURL]:

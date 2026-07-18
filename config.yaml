@@ -512,16 +512,6 @@ url_discovery:
 # Search providers (compliant APIs only; no direct SERP scraping)
 # ---------------------------------------------------------------------------
 search_providers:
-  google_custom_search:
-    # NOTE: Google closed the Custom Search JSON API to NEW customers. A newly
-    # created GCP project returns 403 "project does not have access" no matter
-    # what — so this only works with an OLD project that was already a customer.
-    # Off by default for that reason. cx stays baked in case you have such a key.
-    enabled: false
-    api_key_env: "GOOGLE_CUSTOM_SEARCH_API_KEY"
-    cx_env: "GOOGLE_CUSTOM_SEARCH_CX"
-    cx: "d1226d0d467ff4133"            # Foresight CSE id (not secret); env var overrides if set
-    max_queries_per_cycle: 15          # free tier = 100/day; keep well under it
   bing:
     enabled: false
     api_key_env: "BING_SEARCH_API_KEY"
@@ -742,8 +732,6 @@ dashboard:
   show_source_mix: true
   show_event_seasonality: true
   show_worker_status: true
-  show_cse_widget: true               # embed the Google Programmable Search box in the dashboard
-  cse_cx: "d1226d0d467ff4133"         # Foresight CSE id used by the embedded widget
   colors:
     red: "#E53238"
     blue: "#0064D2"
