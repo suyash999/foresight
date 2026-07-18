@@ -46,6 +46,9 @@ class Scheduler:
         try:
             while not self._stop:
                 try:
+                    # pick up dashboard toggle changes (runtime_overrides.yaml)
+                    if self.config.reload():
+                        self.interval = int(self.config.get("runtime.crawl_interval_seconds", self.interval))
                     result = orch.run_cycle()
                     log.info("Cycle %d complete: %s", cycles + 1, result.get("run_id"))
                 except Exception as exc:

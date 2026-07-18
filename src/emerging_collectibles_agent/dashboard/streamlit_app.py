@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 import streamlit as st
+import yaml
 import streamlit.components.v1 as components
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -207,6 +208,7 @@ tabs = st.tabs([
     "📊 Executive", "🔥 Trending Products", "📰 News → Trending", "🌍 Markets & Geography",
     "📡 Live Feeds & Sources", "🔎 URL Sourcing", "🕸️ Crawl", "🏷️ Sources",
     "📅 Events", "📈 Timeline", "🩺 Agent Health", "🛠️ Self-Serve Learning",
+    "⚙️ Controls",
 ])
 
 # ---- Executive --------------------------------------------------------------
@@ -589,6 +591,87 @@ with tabs[11]:
                      use_container_width=True, height=220)
     if strat.empty and recov.empty and tools.empty:
         st.info("Self-serve learning data appears once recovery paths are exercised.")
+
+# ---- Controls ---------------------------------------------------------------
+with tabs[12]:
+    sec("Runtime controls", "Configuration & Toggles")
+    st.caption("Changes are written to **runtime_overrides.yaml** (config.yaml stays "
+               "untouched) and picked up by the worker on its next cycle. Source "
+               "on/off toggles need a worker restart; mode & Hermes toggles apply live.")
+
+    def _cfg(key, default):
+        return CFG.get(key, default) if CFG else default
+
+    with st.form("controls_form"):
+        st.markdown("##### Run mode")
+        light = st.checkbox(
+            "Light mode (no website crawling — build products from feed/API metadata only)",
+            value=bool(_cfg("runtime.light_mode", True)),
+            help="ON = fast, no 407/robots waits. OFF = heavy crawler that also fetches full pages.")
+        interval = st.number_input("Cycle interval (seconds)", min_value=60, max_value=86400,
+                                   value=int(_cfg("runtime.crawl_interval_seconds", 900)), step=60)
+
+        st.markdown("##### Output / Hermes")
+        keep_csv = st.checkbox(
+            "Keep the master CSV after each run (don't clear it)",
+            value=not bool(_cfg("hive_sink.clear_csv_after_write", False)))
+        hive_on = st.checkbox("Write to Hermes (Hive sink)",
+                              value=bool(_cfg("hive_sink.enabled", False)),
+                              help="Requires Kerberos/ODBC access. Leave off for CSV-only.")
+        hive_method = st.selectbox("Hermes connection method", options=["odbc", "pyhive"],
+                                   index=0 if _cfg("hive_sink.method", "odbc") == "odbc" else 1)
+
+        st.markdown("##### Sources (need worker restart to take effect)")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s_rss = st.checkbox("RSS", value=bool(_cfg("url_discovery.enable_rss_discovery", True)))
+            s_reddit = st.checkbox("Reddit", value=bool(_cfg("url_discovery.enable_reddit_discovery", True)))
+            s_shopify = st.checkbox("Shopify", value=bool(_cfg("url_discovery.enable_shopify_discovery", True)))
+        with c2:
+            s_gnews = st.checkbox("Google News", value=bool(_cfg("url_discovery.enable_google_news_discovery", True)))
+            s_bing = st.checkbox("Bing News", value=bool(_cfg("url_discovery.enable_bing_news_discovery", True)))
+            s_gdelt = st.checkbox("GDELT", value=bool(_cfg("url_discovery.enable_gdelt_discovery", True)))
+        with c3:
+            s_pv = st.checkbox("Wikipedia pageviews", value=bool(_cfg("url_discovery.enable_wikipedia_pageviews_discovery", True)))
+            s_scry = st.checkbox("Scryfall", value=bool(_cfg("url_discovery.enable_scryfall_discovery", True)))
+            s_ph = st.checkbox("Product Hunt", value=bool(_cfg("url_discovery.enable_producthunt_discovery", True)))
+
+        submitted = st.form_submit_button("💾 Save controls")
+
+    if submitted:
+        overrides = {
+            "runtime": {"light_mode": bool(light), "crawl_interval_seconds": int(interval)},
+            "hive_sink": {"enabled": bool(hive_on),
+                          "clear_csv_after_write": (not bool(keep_csv)),
+                          "method": hive_method},
+            "url_discovery": {
+                "enable_rss_discovery": bool(s_rss),
+                "enable_reddit_discovery": bool(s_reddit),
+                "enable_shopify_discovery": bool(s_shopify),
+                "enable_google_news_discovery": bool(s_gnews),
+                "enable_bing_news_discovery": bool(s_bing),
+                "enable_gdelt_discovery": bool(s_gdelt),
+                "enable_wikipedia_pageviews_discovery": bool(s_pv),
+                "enable_scryfall_discovery": bool(s_scry),
+                "enable_producthunt_discovery": bool(s_ph),
+            },
+        }
+        ov_path = os.path.join(os.path.dirname(os.path.abspath(CONFIG_PATH)), "runtime_overrides.yaml")
+        try:
+            with open(ov_path, "w", encoding="utf-8") as fh:
+                yaml.safe_dump(overrides, fh, sort_keys=False)
+            st.success(f"Saved to {ov_path}. The worker applies mode/Hermes changes on its next "
+                       f"cycle; source toggles apply after a worker restart.")
+            get_config.clear()  # bust the cached config so the dashboard reflects it
+        except Exception as exc:
+            st.error(f"Could not write overrides: {exc}")
+
+    # show the current effective override file, if any
+    ov_path = os.path.join(os.path.dirname(os.path.abspath(CONFIG_PATH)), "runtime_overrides.yaml")
+    if os.path.exists(ov_path):
+        with open(ov_path, "r", encoding="utf-8") as fh:
+            st.markdown("##### Current runtime_overrides.yaml")
+            st.code(fh.read(), language="yaml")
 
 st.caption("External-only intelligence · eBay excluded by default · responsible scraping "
            "(robots.txt, rate limits, backoff) · deterministic scoring with optional LLM enhancement.")

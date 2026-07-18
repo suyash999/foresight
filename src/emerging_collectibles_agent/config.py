@@ -47,6 +47,18 @@ class Config:
     def raw(self) -> dict[str, Any]:
         return self._data
 
+    def reload(self) -> bool:
+        """Re-read config.yaml + runtime_overrides.yaml in place. Returns True if
+        reloaded. Flag-style settings read via get() at cycle time go live; values
+        cached in agent __init__ (source lists) need a worker restart."""
+        if not self.path:
+            return False
+        try:
+            self._data = _load_merged(self.path)
+            return True
+        except Exception:
+            return False
+
     # -- convenience accessors used across the codebase ----------------------
     @property
     def verticals(self) -> list[str]:
@@ -96,12 +108,41 @@ def _default_config_path() -> str:
     return str(pkg_cfg)
 
 
-def load_config(path: str | None = None) -> Config:
-    """Load configuration from YAML, applying `.env` first."""
-    load_dotenv(override=False)
-    cfg_path = path or _default_config_path()
+def _deep_merge(base: dict, over: dict) -> dict:
+    """Recursively merge `over` into `base` (returns base, modified in place)."""
+    for k, v in (over or {}).items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+    return base
+
+
+def overrides_path_for(cfg_path: str) -> str:
+    """Sibling runtime_overrides.yaml — dashboard toggles write here so the
+    commented config.yaml is never rewritten."""
+    return os.path.join(os.path.dirname(os.path.abspath(cfg_path)), "runtime_overrides.yaml")
+
+
+def _load_merged(cfg_path: str) -> dict:
     with open(cfg_path, "r", encoding="utf-8") as fh:
         data = yaml.safe_load(fh) or {}
     if not isinstance(data, dict):
         raise ValueError(f"config.yaml must be a mapping, got {type(data)}")
-    return Config(data, path=cfg_path)
+    ov_path = overrides_path_for(cfg_path)
+    if os.path.exists(ov_path):
+        try:
+            with open(ov_path, "r", encoding="utf-8") as fh:
+                over = yaml.safe_load(fh) or {}
+            if isinstance(over, dict):
+                _deep_merge(data, over)
+        except Exception:
+            pass
+    return data
+
+
+def load_config(path: str | None = None) -> Config:
+    """Load configuration from YAML (+ optional runtime_overrides.yaml), applying `.env` first."""
+    load_dotenv(override=False)
+    cfg_path = path or _default_config_path()
+    return Config(_load_merged(cfg_path), path=cfg_path)
