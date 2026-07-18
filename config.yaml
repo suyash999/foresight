@@ -238,6 +238,33 @@ seed_reddit_subreddits:
 seed_youtube_channels: []
 #  - { channel_id: "UCxxxxxxxxxxxxxxxxxxxxxx", source_type: "social/news aggregation", verticals: ["Trading Cards"] }
 
+# Shopify-hosted collectible brand stores. Every Shopify store auto-exposes a
+# keyless public catalog at /products.json with created_at / published_at, so this
+# is a real-time new-SKU discovery feed (no key). Verified reachable during the
+# sources research. A store can disable the endpoint; the channel degrades gracefully.
+seed_shopify_stores:
+  - { url: "https://super7.com", source_type: "official manufacturer", verticals: ["Toys and Hobbies", "Collectibles"] }
+  - { url: "https://kidrobot.com", source_type: "official manufacturer", verticals: ["Collectibles", "Toys and Hobbies"] }
+  - { url: "https://youtooz.com", source_type: "official manufacturer", verticals: ["Collectibles", "Entertainment Memorabilia"] }
+  - { url: "https://mondoshop.com", source_type: "official manufacturer", verticals: ["Collectibles", "Vinyl Records", "Entertainment Memorabilia"] }
+  - { url: "https://www.fangamer.com", source_type: "official manufacturer", verticals: ["Collectibles", "Toys and Hobbies"] }
+
+# Wikipedia articles to watch for a pageview SPIKE (keyless Wikimedia Pageviews
+# API). A sustained jump in views is a leading emergence signal — in the Labubu
+# case, pageviews rose 5-8 months before mainstream US news. Add brand/product
+# pages here; a spike emits a high-priority DiscoveredURL.
+wikipedia_watchlist:
+  - { article: "Labubu", verticals: ["Collectibles", "Toys and Hobbies"] }
+  - { article: "Pop_Mart", verticals: ["Collectibles", "Toys and Hobbies"] }
+  - { article: "Sonny_Angel", verticals: ["Collectibles", "Toys and Hobbies"] }
+  - { article: "Smiski", verticals: ["Collectibles", "Toys and Hobbies"] }
+  - { article: "Bearbrick", verticals: ["Collectibles"] }
+  - { article: "Funko", verticals: ["Collectibles"] }
+  - { article: "Pokémon_Trading_Card_Game", verticals: ["Trading Cards"] }
+  - { article: "Hot_Wheels", verticals: ["Toys and Hobbies"] }
+  - { article: "Lego", verticals: ["Toys and Hobbies"] }
+  - { article: "Topps", verticals: ["Trading Cards", "Sports Memorabilia"] }
+
 seed_urls:
   - url: "https://www.cardboardconnection.com/"
     source_type: "hobby publication"
@@ -489,7 +516,7 @@ url_discovery:
   max_urls_per_cycle: 10000
   min_urls_per_vertical: 100
   max_urls_per_domain_per_cycle: 100
-  max_discovery_seconds: 120        # hard cap so a slow/blocked network never hangs a cycle
+  max_discovery_seconds: 180        # hard cap so a slow/blocked network never hangs a cycle
   max_recursion_depth: 3
   enable_recursive_expansion: true
   enable_search_api_discovery: true
@@ -506,6 +533,17 @@ url_discovery:
   enable_reddit_discovery: true    # keyless collector-community RSS (agent-reach style)
   enable_hn_discovery: true        # keyless Hacker News Algolia search
   enable_youtube_discovery: true   # OFFICIAL YouTube channel RSS only (no scraping)
+  # --- keyless open-source channels added after the sources research -------
+  enable_google_news_discovery: true        # keyless Google News RSS keyword search (US)
+  enable_bing_news_discovery: true          # keyless Bing News RSS keyword search (US)
+  enable_google_trends_discovery: true      # keyless Google Trends daily RSS (demand signal)
+  enable_wikipedia_pageviews_discovery: true # keyless Wikimedia Pageviews (emergence signal)
+  enable_eventstream_discovery: false       # keyless Wikimedia EventStreams (new-article SSE); off — see provider note
+  enable_shopify_discovery: true            # keyless Shopify products.json (new SKUs)
+  enable_scryfall_discovery: true           # keyless MTG set release calendar
+  enable_pokemontcg_discovery: true         # keyless Pokemon TCG set feed (news-amplified)
+  enable_producthunt_discovery: true        # keyless Product Hunt launch feed
+  enable_gamefound_discovery: true          # keyless crowdfunding launches
   relevance_threshold: 0.15        # low threshold = high recall
 
 # ---------------------------------------------------------------------------
@@ -520,6 +558,53 @@ search_providers:
   serpapi:
     enabled: false
     api_key_env: "SERPAPI_API_KEY"
+  # --- keyless open-source providers (no key, US) --------------------------
+  google_news:
+    # Best-effort: Google now encodes RSS <link> as opaque IDs that only resolve
+    # via a ToS-gray batchexecute call, so only older-format links (which embed
+    # the real URL) are used and the rest are skipped. Bing News + GDELT are the
+    # reliable keyless keyword-news channels; Google News is a bonus when links decode.
+    enabled: true
+    max_queries_per_cycle: 30
+    window: "7d"                   # Google News `when:` recency operator
+  bing_news:
+    enabled: true                  # keyless Bing News RSS keyword search (US) — real publisher URLs; primary keyword-news channel
+    max_queries_per_cycle: 30
+  google_trends:
+    enabled: true                  # keyless Google Trends daily RSS — earliest demand-side spike signal
+    geo: "US"
+  wikipedia_pageviews:
+    enabled: true                  # keyless Wikimedia Pageviews API — attention/emergence detector
+    top_limit: 200                 # how many daily top-viewed articles to scan
+    top_lag_days: 2                # pageview data lands ~1-2 days late
+    spike_ratio: 2.0               # watchlist: 7-day avg / prior avg to flag a spike
+    spike_min_views: 50            # ignore low-traffic noise
+  wikimedia_eventstream:
+    # OFF by default: this is a real-time firehose meant for continuous
+    # consumption. A short bounded read per cycle almost always sees 0 new
+    # English-Wikipedia articles (they are created only a few times per minute),
+    # so it costs ~read_seconds per cycle for ~no result. The wikipedia_pageviews
+    # channel (top + watchlist spike) is the better emergence detector. Enable
+    # this only for a long-lived deployment that can hold the stream open.
+    enabled: false
+    read_seconds: 10               # time-boxed so a cycle never hangs on the stream
+  shopify:
+    enabled: true                  # keyless Shopify products.json — real-time new-SKU discovery
+    max_products_per_store: 60
+  scryfall:
+    enabled: true                  # keyless MTG set release calendar (future released_at)
+    window_days_back: 120
+    window_days_forward: 365
+  pokemontcg:
+    enabled: true                  # keyless Pokemon TCG set feed (news-amplified — no per-set page)
+    api_key_env: "POKEMONTCG_API_KEY"   # OPTIONAL free key raises rate limits
+    window_days_back: 120
+  producthunt:
+    enabled: true                  # keyless Product Hunt launch feed
+    max_items: 50
+  gamefound:
+    enabled: true                  # keyless crowdfunding (emerging tabletop/collectibles)
+    endpoint: "https://gamefound.com/api/public/projects"
   gdelt:
     enabled: true                  # free, no key
   rss:
@@ -551,7 +636,9 @@ scraping:
   per_domain_delay_seconds: 2.0
   global_max_concurrency: 6
   respect_robots_txt: true
-  user_agent: "EmergingCollectiblesIntelligenceBot/1.0 (+research; respects robots.txt)"
+  # NOTE: include a contact URL — Wikimedia's REST APIs (pageviews, EventStreams)
+  # return 403 for a UA without one. This URL satisfies their bot policy.
+  user_agent: "EmergingCollectiblesIntelligenceBot/1.0 (+https://github.com/suyash999/foresight; research; respects robots.txt)"
   min_product_name_quality: 0.5     # reject non-product strings (news/prose/spec lines)
   use_playwright: false
   use_camoufox: false
