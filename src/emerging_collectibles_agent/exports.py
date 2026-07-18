@@ -312,10 +312,17 @@ class Exporter:
         master_df = master_df.sort_values("EPS", ascending=False) if not master_df.empty else master_df
         master_path = os.path.join(self.output_dir, "master_intelligence_latest.csv")
         master_df.to_csv(master_path, index=False)
-        log.info("Exported %d products to CSV/Parquet/JSON + master CSV", len(rows))
+        # Local accumulating copy that MIRRORS the Hermes append — one durable copy
+        # on disk, one in Hermes. Header written once; each cycle appends its rows.
+        if not master_df.empty:
+            hist_path = os.path.join(self.output_dir, "master_intelligence_history.csv")
+            master_df.to_csv(hist_path, mode="a", index=False,
+                             header=not os.path.exists(hist_path))
+        log.info("Exported %d products to CSV/Parquet/JSON + master CSV (+ history)", len(rows))
 
-        # Optional Hive sink (Krylov). On CONFIRMED success, flush the master CSV
-        # back to a header-only file so it never grows on disk.
+        # Hive sink (Krylov). write_mode=append => create table if absent, then
+        # append this cycle's rows. Local CSVs are kept (clear_csv_after_write=false)
+        # so there is always one copy on disk and one in Hermes.
         try:
             hive_ok = self.hive.write_master(master_df)
             if hive_ok and self.clear_csv_after_write:

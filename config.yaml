@@ -852,8 +852,8 @@ dashboard:
 # Disabled by default; only runs where PyHive + Kerberos are available.
 # ---------------------------------------------------------------------------
 hive_sink:
-  enabled: false                       # set true on Krylov (leave OFF for light-mode CSV test)
-  method: "odbc"                       # odbc (Simba+Kerberos, proven for Hermes) | pyhive
+  enabled: true                        # validated: Simba ODBC + user/password (credentials.json)
+  method: "odbc"                       # odbc (Simba; user/pass via credentials.json, else Kerberos) | pyhive
   odbc_driver: "/opt/simba/carmel/libSparkODBC64.so"
   krb_realm: "PROD.EBAY.COM"
   host: "hermes.prod.vip.ebay.com"

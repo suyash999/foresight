@@ -139,11 +139,19 @@ class HiveSink:
         return f"{self.database}.{self.table}"
 
     def _connect(self):
-        # ODBC path (eBay Hermes/Carmel via Simba Spark ODBC + Kerberos) — this is
-        # the connection style proven to work in the user's notebook environment.
+        # ODBC path (eBay Hermes/Carmel via Simba Spark ODBC). Prefer USERNAME/
+        # PASSWORD auth (AUTHMECH=3) from credentials.json — validated to work on
+        # this cluster — and fall back to Kerberos (AUTHMECH=1) if no password.
         if self.method == "odbc":
             import pyodbc  # lazy
-            log.info("Hive sink: connecting to %s:%s via Simba ODBC + Kerberos.",
+            if self._creds and self._creds.get("password"):
+                log.info("Hive sink: connecting to %s:%s via Simba ODBC + user/password (AUTHMECH=3) as %s.",
+                         self.host, self.port, self._creds.get("username"))
+                return pyodbc.connect(
+                    Driver=self.odbc_driver, HOST=self.host, PORT=self.port,
+                    autocommit=True, SSL=1, AUTHMECH=3,
+                    UID=self._creds.get("username"), PWD=self._creds.get("password"))
+            log.info("Hive sink: connecting to %s:%s via Simba ODBC + Kerberos (AUTHMECH=1).",
                      self.host, self.port)
             return pyodbc.connect(
                 Driver=self.odbc_driver, HOST=self.host, PORT=self.port,
@@ -206,20 +214,29 @@ class HiveSink:
         master_df = master_df.rename(columns={"EPS": "eps", "VTM": "vtm"})
         try:
             cur = conn.cursor()
-            cur.execute(self._create_table_sql())
+            # replace = drop+recreate (Spark has no reliable TRUNCATE via ODBC),
+            # append = create-if-absent. Matches the validated notebook flow.
             if self.write_mode == "replace":
                 try:
-                    cur.execute(f"TRUNCATE TABLE {self.fqtn}")
+                    cur.execute(f"DROP TABLE IF EXISTS {self.fqtn}")
                 except Exception as exc:
-                    log.warning("Hive sink: TRUNCATE failed (%s); appending instead.", exc)
+                    log.warning("Hive sink: DROP failed (%s); appending instead.", exc)
+            cur.execute(self._create_table_sql())
             cols = ", ".join(c for c, _ in HIVE_SCHEMA)
             rows = master_df.to_dict("records")
             written = 0
-            for start in range(0, len(rows), self.batch_size):
-                chunk = rows[start:start + self.batch_size]
-                values = ",\n".join(self._row_values(r) for r in chunk)
-                cur.execute(f"INSERT INTO {self.fqtn} ({cols}) VALUES\n{values}")
-                written += len(chunk)
+            if self.method == "odbc":
+                # per-row INSERT (Spark ODBC — the validated path); multi-row VALUES
+                # is not reliably supported.
+                for r in rows:
+                    cur.execute(f"INSERT INTO {self.fqtn} ({cols}) VALUES {self._row_values(r)}")
+                    written += 1
+            else:
+                for start in range(0, len(rows), self.batch_size):
+                    chunk = rows[start:start + self.batch_size]
+                    values = ",\n".join(self._row_values(r) for r in chunk)
+                    cur.execute(f"INSERT INTO {self.fqtn} ({cols}) VALUES\n{values}")
+                    written += len(chunk)
             try:
                 conn.commit()
             except Exception:
